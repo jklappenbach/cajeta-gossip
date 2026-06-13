@@ -1,0 +1,9 @@
+# Cajeta build output (once the library build lands — see plans/)
+build/
+dist/
+*.car
+.cajeta/
+
+# Editor / OS
+.DS_Store
+*.swp
