@@ -27,12 +27,17 @@ public final class MembershipTable {
     /** Insertion-ordered member names — the deterministic iteration order
      *  for [`tick`](#tick) (and, later, round-robin probe selection). */
     public ArrayList<String> names;
+    /** Ordered log of applied transitions — the `events()` surface, and
+     *  what [`GossipNode`](GossipNode.cajeta) drains into the piggyback
+     *  queue (every event becomes a gossiped delta). */
+    public ArrayList<MembershipEvent> events;
     /** SUSPECT → DEAD promotion delay, millis. */
     public int64 suspectTimeoutMillis;
 
     public MembershipTable(int64 suspectTimeoutMillis) {
         this.members = heap HashMap<String, Member>(16);
         this.names = heap ArrayList<String>();
+        this.events = heap ArrayList<MembershipEvent>();
         this.suspectTimeoutMillis = suspectTimeoutMillis;
     }
 
@@ -59,11 +64,15 @@ public final class MembershipTable {
             String nameCopy = heap String(#nb, n);
             this.names.add(#nameCopy);
             this.members.put(name, #fresh);
+            this.logEvent(EventKind.JOINED, name);
             return true;
         }
         Member m = this.members.get(name);
         if (incarnation <= m.incarnation) {
             return false;
+        }
+        if (m.state == MemberState.SUSPECT) {
+            this.logEvent(EventKind.RECOVERED, name);
         }
         m.state = MemberState.ALIVE;
         m.incarnation = incarnation;
@@ -96,9 +105,13 @@ public final class MembershipTable {
         } else {
             return false;                     // DEAD / LEFT are terminal
         }
+        boolean fresh = m.state == MemberState.ALIVE;
         m.state = MemberState.SUSPECT;
         m.incarnation = incarnation;
         m.suspectSince = now;
+        if (fresh) {
+            this.logEvent(EventKind.SUSPECTED, name);
+        }
         return true;
     }
 
@@ -119,6 +132,7 @@ public final class MembershipTable {
         }
         m.state = MemberState.DEAD;
         m.incarnation = incarnation;
+        this.logEvent(EventKind.DEAD, name);
         return true;
     }
 
@@ -132,6 +146,7 @@ public final class MembershipTable {
             return false;
         }
         m.state = MemberState.LEFT;
+        this.logEvent(EventKind.LEFT, name);
         return true;
     }
 
@@ -148,6 +163,11 @@ public final class MembershipTable {
         this.applySuspect(name, m.incarnation, now);
     }
 
+    private void logEvent(EventKind kind, String name) {
+        MembershipEvent e = heap MembershipEvent(kind, name);
+        this.events.add(#e);
+    }
+
     /**
      * Advance suspicion timeouts: every SUSPECT whose window expired
      * (`now - suspectSince >= suspectTimeoutMillis`) is promoted to DEAD.
@@ -161,6 +181,7 @@ public final class MembershipTable {
             if (m.state == MemberState.SUSPECT
                     && now - m.suspectSince >= this.suspectTimeoutMillis) {
                 m.state = MemberState.DEAD;
+                this.logEvent(EventKind.DEAD, m.name);
                 promoted = promoted + 1;
             }
             i = i + 1;

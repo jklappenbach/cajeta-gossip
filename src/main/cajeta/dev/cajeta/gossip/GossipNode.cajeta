@@ -8,6 +8,8 @@ import cajeta.io.net.RecvResult;
 import cajeta.concurrent.Tasks;
 import cajeta.concurrent.Channel;
 import cajeta.time.Duration;
+import cajeta.time.Clock;
+import cajeta.collection.ArrayList;
 
 /**
  * G3 — the transport binding (spec § Runtime integration): one node's
@@ -40,6 +42,18 @@ public final class GossipNode {
      *  primitives are safe by value). */
     public Channel<int64> acks;
     public WireWriter writer;
+    /** The receive fiber's own writer — replies (ACK/SYNC) must not race
+     *  the probe/broadcast fiber's frame under the default carrier pool. */
+    public WireWriter rxWriter;
+    /** Infection-style dissemination buffer (G5). */
+    public PiggybackQueue piggyback;
+    /** Received app payloads — the `messages()` surface (an owned inbox;
+     *  `Channel` lends its slots, so heap payloads ride a list instead). */
+    public ArrayList<UserMessage> inbox;
+    /** How far the piggyback drain has read the table's event log. */
+    public int32 eventsDrained;
+    /** Deltas piggybacked per outgoing frame (spec default 3). */
+    public int32 gossipFanout;
     public boolean running;
     /** `k` — indirect probes per failed direct probe (default 3). */
     public int32 indirectK;
@@ -59,6 +73,11 @@ public final class GossipNode {
         this.membership = heap MembershipTable(suspectTimeoutMillis);
         this.acks = heap Channel<int64>(16);
         this.writer = heap WireWriter();
+        this.rxWriter = heap WireWriter();
+        this.piggyback = heap PiggybackQueue();
+        this.inbox = heap ArrayList<UserMessage>();
+        this.eventsDrained = 0;
+        this.gossipFanout = 3;
         this.running = true;
         this.indirectK = 3;
         this.pingReqSeen = 0;
@@ -114,21 +133,35 @@ public final class GossipNode {
         int8 t = m.msgType;
         String sender = m.senderName;
         if (t == Wire.PING) {
-            // Reply with a bare ACK carrying our identity.
-            this.writer.begin(Wire.ACK, this.name, this.incarnation);
-            int8[] ack = this.writer.finish();
+            // Pings carry piggybacked deltas — apply, then reply with an
+            // ACK that piggybacks our own queue (the epidemic push-pull).
+            this.applyDeltas(m);
+            this.drainEvents();
+            this.rxWriter.begin(Wire.ACK, this.name, this.incarnation);
+            this.piggyback.fill(this.rxWriter, this.gossipFanout,
+                                this.membership.names.count() + 1);
+            int8[] ack = this.rxWriter.finish();
             this.sock.sendTo(ack, 0, (int32) ack.count(), from);
         } else if (t == Wire.ACK) {
-            // Direct evidence of life: upsert the sender ALIVE (loopback
-            // v4-mapped; real address plumbing is G4) and signal the prober.
+            // Direct evidence of life: upsert the sender ALIVE and apply
+            // whatever the ack piggybacked, then signal the prober.
             this.membership.applyAlive(sender, 0, 2130706433,
                                        from.getPort(), m.senderIncarnation);
+            this.applyDeltas(m);
+            this.drainEvents();
             this.acks.send(sender.hash());
+        } else if (t == Wire.USER) {
+            this.applyDeltas(m);
+            this.drainEvents();
+            int8[] pl = m.payload;
+            UserMessage um = heap UserMessage(sender, pl, (int32) pl.count());
+            this.inbox.add(#um);
         } else if (t == Wire.SYNC) {
             // Apply the snapshot's deltas, then answer a REQUEST (non-empty
             // payload marker) with our own snapshot — response payloads are
             // empty, so replies never re-reply (no sync storms).
             this.applyDeltas(m);
+            this.drainEvents();
             int8[] marker = m.payload;
             if ((int32) marker.count() > 0) {
                 this.sendSnapshot(from);
@@ -191,19 +224,19 @@ public final class GossipNode {
      *  join-time sync is bounded by design; anti-entropy beyond it is out
      *  of scope for v1). Empty payload = response (never re-replied). */
     public void sendSnapshot(SocketAddress dest) {
-        this.writer.begin(Wire.SYNC, this.name, this.incarnation);
-        this.writer.addDelta((int8) MemberState.ALIVE, this.incarnation,
-                             0, 2130706433, (int64) this.boundPort, this.name);
+        this.rxWriter.begin(Wire.SYNC, this.name, this.incarnation);
+        this.rxWriter.addDelta((int8) MemberState.ALIVE, this.incarnation,
+                               0, 2130706433, (int64) this.boundPort, this.name);
         int32 i = 0;
         while (i < this.membership.names.count()) {
             Member m = this.membership.get(this.membership.names.get(i));
             if (m.state == MemberState.ALIVE) {
-                this.writer.addDelta((int8) MemberState.ALIVE, m.incarnation,
-                                     m.addrHi, m.addrLo, m.port, m.name);
+                this.rxWriter.addDelta((int8) MemberState.ALIVE, m.incarnation,
+                                       m.addrHi, m.addrLo, m.port, m.name);
             }
             i = i + 1;
         }
-        int8[] frame = this.writer.finish();
+        int8[] frame = this.rxWriter.finish();
         this.sock.sendTo(frame, 0, (int32) frame.count(), dest);
     }
 
@@ -255,6 +288,88 @@ public final class GossipNode {
     }
 
     /**
+     * Turn every new table event into a piggybacked delta — the single
+     * bridge from state changes to the epidemic (JOINED/RECOVERED spread
+     * as ALIVE, SUSPECTED as SUSPECT, DEAD as DEAD, LEFT as LEFT).
+     */
+    public void drainEvents() {
+        while (this.eventsDrained < this.membership.events.count()) {
+            MembershipEvent e = this.membership.events.get(this.eventsDrained);
+            Member m = this.membership.get(e.name);
+            if (m != null) {
+                int8 st = (int8) MemberState.ALIVE;
+                if (e.kind == EventKind.SUSPECTED) {
+                    st = (int8) MemberState.SUSPECT;
+                } else if (e.kind == EventKind.DEAD) {
+                    st = (int8) MemberState.DEAD;
+                } else if (e.kind == EventKind.LEFT) {
+                    st = (int8) MemberState.LEFT;
+                }
+                this.piggyback.offer(st, m.incarnation, m.addrHi, m.addrLo,
+                                     m.port, m.name);
+            }
+            this.eventsDrained = this.eventsDrained + 1;
+        }
+    }
+
+    /**
+     * The protocol-period fiber (spec § Runtime integration): every
+     * `periodMs`, probe the next ALIVE member round-robin (the plan's
+     * random selection is a follow-up — round-robin gives the same
+     * coverage guarantee deterministically), advance suspicion timeouts,
+     * and drain fresh events into the piggyback queue. Run as
+     * `spawn <wrapper>(node)`; stops with [`stop`](#stop).
+     */
+    public void protocolLoop(int32 periodMs) {
+        int32 idx = 0;
+        while (this.running) {
+            int32 n = this.membership.names.count();
+            int32 tries = 0;
+            boolean probed = false;
+            while (tries < n && !probed && this.running) {
+                idx = idx + 1;
+                if (idx >= n) {
+                    idx = 0;
+                }
+                String peer = this.membership.names.get(idx);
+                Member m = this.membership.get(peer);
+                if (m.state == MemberState.ALIVE) {
+                    this.probe(peer, (int32) m.port, periodMs,
+                               Clock.millisTime());
+                    probed = true;
+                }
+                tries = tries + 1;
+            }
+            this.membership.tick(Clock.millisTime());
+            this.drainEvents();
+            Tasks.sleepMillis((int64) periodMs);
+        }
+    }
+
+    /**
+     * Gossip an app payload to the cluster: one `USER` frame (piggybacking
+     * membership deltas like any other frame) sent to every ALIVE member.
+     * Direct fan-out in v1 — epidemic relay of user messages (IDs + dedup)
+     * is a post-v1 refinement.
+     */
+    public void broadcast(int8[] payload) {
+        this.writer.begin(Wire.USER, this.name, this.incarnation);
+        this.piggyback.fill(this.writer, this.gossipFanout,
+                            this.membership.names.count() + 1);
+        this.writer.setPayload(payload);
+        int8[] frame = this.writer.finish();
+        int32 i = 0;
+        while (i < this.membership.names.count()) {
+            Member m = this.membership.get(this.membership.names.get(i));
+            if (m.state == MemberState.ALIVE) {
+                SocketAddress dest = this.addrOf(m);
+                this.sock.sendTo(frame, 0, (int32) frame.count(), dest);
+            }
+            i = i + 1;
+        }
+    }
+
+    /**
      * One SWIM probe cycle against `target` at loopback `targetPort`:
      * direct `PING`, ack awaited `timeoutMs` under `Tasks.withTimeout`;
      * on miss, `k` `PING_REQ`s (payload = target name) to other live
@@ -267,6 +382,8 @@ public final class GossipNode {
         IpAddress lo = IpAddress.loopbackV4();
         SocketAddress dest = SocketAddress.of(#lo, targetPort);
         this.writer.begin(Wire.PING, this.name, this.incarnation);
+        this.piggyback.fill(this.writer, this.gossipFanout,
+                            this.membership.names.count() + 1);
         int8[] ping = this.writer.finish();
         this.sock.sendTo(ping, 0, (int32) ping.count(), dest);
 

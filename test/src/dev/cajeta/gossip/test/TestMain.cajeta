@@ -11,6 +11,7 @@ public final class TestMain {
         GossipMembershipTests.run(c);
         GossipTransportTests.run(c);
         GossipJoinLeaveTests.run(c);
+        GossipDisseminationTests.run(c);
 
         System.stdout.println("");
         System.stdout.println("=== {} passed, {} failed ===",

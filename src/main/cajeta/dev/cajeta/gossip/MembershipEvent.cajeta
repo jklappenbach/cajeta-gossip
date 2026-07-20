@@ -1,0 +1,21 @@
+package dev.cajeta.gossip;
+
+/**
+ * One observed membership transition (spec surface: the `events()`
+ * stream). Appended to [`MembershipTable.events`](MembershipTable.cajeta)
+ * by every applied state change — the bridge both the app API and the
+ * piggyback queue drain from (every event becomes a gossiped delta).
+ */
+public final class MembershipEvent {
+    public EventKind kind;
+    public String    name;
+
+    public MembershipEvent(EventKind kind, String name) {
+        this.kind = kind;
+        // Own a copy — callers pass borrowed names.
+        int8[] nb = name.toBytes();
+        int32 n = (int32) nb.count();
+        String owned = heap String(#nb, n);
+        this.name = #owned;
+    }
+}

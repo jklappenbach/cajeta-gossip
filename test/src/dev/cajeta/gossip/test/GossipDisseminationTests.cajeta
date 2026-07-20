@@ -1,0 +1,158 @@
+package dev.cajeta.gossip.test;
+
+import dev.cajeta.gossip.GossipNode;
+import dev.cajeta.gossip.Member;
+import dev.cajeta.gossip.MemberState;
+import dev.cajeta.gossip.UserMessage;
+import cajeta.concurrent.Tasks;
+
+// G5 — infection-style dissemination + the app-facing API (plan §1.e).
+public final class GossipDisseminationTests {
+
+    public static async void runNode(GossipNode n) {
+        n.receiveLoop();
+    }
+
+    public static async void runLoop(GossipNode n) {
+        n.protocolLoop(50);
+    }
+
+    public static void run(Check c) {
+        System.stdout.println("GossipDisseminationTests");
+        updateConvergesLogN(c);
+        userBroadcastDelivered(c);
+    }
+
+    // §1.e.1 — a membership change at ONE node (a newcomer joining only
+    // n4) reaches every other node via deltas piggybacked on the periodic
+    // probe traffic — no separate broadcast. The poll window is a generous
+    // O(log N)-periods bound (50ms periods, 5s cap).
+    public static void updateConvergesLogN(Check c) {
+        () -> int32 body = () -> {
+            GossipNode n0 = heap GossipNode("n0", 60000);
+            GossipNode n1 = heap GossipNode("n1", 60000);
+            GossipNode n2 = heap GossipNode("n2", 60000);
+            GossipNode n3 = heap GossipNode("n3", 60000);
+            GossipNode n4 = heap GossipNode("n4", 60000);
+            GossipNode nx = heap GossipNode("nx", 60000);
+            int32 result = 0;
+            scope {
+                spawn runNode(n0);
+                spawn runNode(n1);
+                spawn runNode(n2);
+                spawn runNode(n3);
+                spawn runNode(n4);
+                spawn runNode(nx);
+                boolean j1 = n1.join(n0.port(), 1000);
+                boolean j2 = n2.join(n0.port(), 1000);
+                boolean j3 = n3.join(n0.port(), 1000);
+                boolean j4 = n4.join(n0.port(), 1000);
+                if (!j1 || !j2 || !j3 || !j4) {
+                    result = 10;
+                } else {
+                    spawn runLoop(n0);
+                    spawn runLoop(n1);
+                    spawn runLoop(n2);
+                    spawn runLoop(n3);
+                    spawn runLoop(n4);
+                    // The change: nx joins ONLY n4.
+                    boolean jx = nx.join(n4.port(), 1000);
+                    if (!jx) {
+                        result = 11;
+                    } else {
+                        // Converge: n0..n3 all learn nx via piggyback.
+                        int32 waited = 0;
+                        boolean done = false;
+                        while (waited < 5000 && !done) {
+                            Member a0 = n0.table().get("nx");
+                            Member a1 = n1.table().get("nx");
+                            Member a2 = n2.table().get("nx");
+                            Member a3 = n3.table().get("nx");
+                            if (a0 != null && a1 != null && a2 != null
+                                    && a3 != null) {
+                                done = true;
+                            } else {
+                                Tasks.sleepMillis(25);
+                                waited = waited + 25;
+                            }
+                        }
+                        if (!done) {
+                            result = 12;       // no convergence in window
+                        } else if (n0.table().get("nx").state
+                                       != MemberState.ALIVE) {
+                            result = 13;
+                        } else {
+                            result = 1;
+                        }
+                    }
+                }
+                n0.stop();
+                n1.stop();
+                n2.stop();
+                n3.stop();
+                n4.stop();
+                nx.stop();
+            }
+            return result;
+        };
+        int32 r = Tasks.runBlocking<int32>(body);
+        c.eqInt(r, 1, "membership change converges via piggyback (code " + r + ")");
+    }
+
+    // §1.e.2 — broadcast(bytes) lands in every peer's message inbox with
+    // the sender's identity and the exact payload.
+    public static void userBroadcastDelivered(Check c) {
+        () -> int32 body = () -> {
+            GossipNode a = heap GossipNode("a", 5000);
+            GossipNode b = heap GossipNode("b", 5000);
+            GossipNode x = heap GossipNode("x", 5000);
+            int32 result = 0;
+            scope {
+                spawn runNode(a);
+                spawn runNode(b);
+                spawn runNode(x);
+                boolean jb = b.join(a.port(), 1000);
+                boolean jx = x.join(a.port(), 1000);
+                if (!jb || !jx) {
+                    result = 10;
+                } else {
+                    int8[] pay = heap int8[3];
+                    pay[0] = (int8) 9;
+                    pay[1] = (int8) 8;
+                    pay[2] = (int8) 7;
+                    a.broadcast(pay);
+                    int32 waited = 0;
+                    while (waited < 1000
+                            && (b.inbox.count() < 1 || x.inbox.count() < 1)) {
+                        Tasks.sleepMillis(10);
+                        waited = waited + 10;
+                    }
+                    if (b.inbox.count() < 1 || x.inbox.count() < 1) {
+                        result = 11;
+                    } else {
+                        UserMessage mb = b.inbox.get(0);
+                        UserMessage mx = x.inbox.get(0);
+                        if (!mb.from.equals("a")) {
+                            result = 12;
+                        } else if ((int32) mb.payload.count() != 3
+                                   || mb.payload[0] != 9
+                                   || mb.payload[2] != 7) {
+                            result = 13;
+                        } else if ((int32) mx.payload.count() != 3
+                                   || mx.payload[1] != 8) {
+                            result = 14;
+                        } else {
+                            result = 1;
+                        }
+                    }
+                }
+                a.stop();
+                b.stop();
+                x.stop();
+            }
+            return result;
+        };
+        int32 r = Tasks.runBlocking<int32>(body);
+        c.eqInt(r, 1, "broadcast delivered to peer inboxes (code " + r + ")");
+    }
+}

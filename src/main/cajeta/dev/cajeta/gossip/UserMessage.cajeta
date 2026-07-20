@@ -1,0 +1,25 @@
+package dev.cajeta.gossip;
+
+/**
+ * One application payload received from a peer (spec surface: the
+ * `messages()` stream). Owns copies of both the sender name and the
+ * bytes — inbox entries outlive the datagram they arrived in.
+ */
+public final class UserMessage {
+    public String from;
+    public int8[] payload;
+
+    public UserMessage(String from, int8[] payload, int32 length) {
+        int8[] fb = from.toBytes();
+        int32 fn = (int32) fb.count();
+        String owned = heap String(#fb, fn);
+        this.from = #owned;
+        int8[] copy = heap int8[length];
+        int32 i = 0;
+        while (i < length) {
+            copy[i] = payload[i];
+            i = i + 1;
+        }
+        this.payload = #copy;
+    }
+}

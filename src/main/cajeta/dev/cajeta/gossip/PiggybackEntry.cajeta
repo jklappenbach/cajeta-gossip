@@ -1,0 +1,31 @@
+package dev.cajeta.gossip;
+
+/**
+ * One membership delta queued for infection-style spread — rides outgoing
+ * `PING`/`ACK` (and `USER`) frames until its retransmit budget is spent.
+ * See [`PiggybackQueue`](PiggybackQueue.cajeta).
+ */
+public final class PiggybackEntry {
+    public int8   state;
+    public int64  incarnation;
+    public int64  addrHi;
+    public int64  addrLo;
+    public int64  port;
+    public String name;
+    /** Times this delta has ridden an outgoing frame. */
+    public int32  sends;
+
+    public PiggybackEntry(int8 state, int64 incarnation, int64 addrHi,
+                          int64 addrLo, int64 port, String name) {
+        this.state = state;
+        this.incarnation = incarnation;
+        this.addrHi = addrHi;
+        this.addrLo = addrLo;
+        this.port = port;
+        int8[] nb = name.toBytes();
+        int32 n = (int32) nb.count();
+        String owned = heap String(#nb, n);
+        this.name = #owned;
+        this.sends = 0;
+    }
+}

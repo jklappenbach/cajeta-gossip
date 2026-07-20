@@ -128,10 +128,12 @@ d. **Join / leave (G4)**
 
 e. **Dissemination + user data (G5)**
 
-   1. [ ] A membership change at one node reaches all N nodes within O(log N)
-      periods. → `GossipDisseminationTests.updateConvergesLogN`.
-   2. [ ] `broadcast(bytes)` is delivered to peers' `messages()` channels. →
-      `GossipDisseminationTests.userBroadcastDelivered`.
+   1. [x] A membership change at one node (a newcomer joining only n4)
+      reaches all N nodes via deltas piggybacked on periodic probe traffic
+      (6 nodes, 50ms periods, generous O(log N) poll bound). →
+      `GossipDisseminationTests.updateConvergesLogN`.
+   2. [x] `broadcast(bytes)` is delivered to peers' message inboxes (sender
+      identity + exact payload). → `GossipDisseminationTests.userBroadcastDelivered`.
 
 f. **Cluster convergence / failure (G6)**
 
@@ -189,8 +191,22 @@ d. **Join / leave / discovery** · `gossip` (G4)
 
 e. **Dissemination + app API** · `gossip` (G5)
 
-   1. [ ] Piggyback dissemination with the `λ·log N` retransmit budget;
-      `events()` / `broadcast()` / `messages()` channels. `GOSSIP-5`.
+   1. [x] Piggyback dissemination with the `λ·log N` retransmit budget
+      (`PiggybackQueue`: λ=3, newest-wins per member, MTU-aware fill on
+      every PING/ACK/USER frame; push-pull — acks piggyback back);
+      `MembershipTable.events` (ordered transition log: JOINED/SUSPECTED/
+      RECOVERED/LEFT/DEAD — the single bridge from state changes to
+      gossiped deltas via `drainEvents`); `protocolLoop` (the protocol-
+      period fiber: round-robin ALIVE probe + tick + drain);
+      `broadcast()` + the `inbox` of owned `UserMessage`s. `GOSSIP-5`.
+      *Deviations from the spec surface, recorded: `events()`/`messages()`
+      are owned lists (+ cursor) rather than `Channel<T>` — Channel lends
+      its slots, so heap payloads would dangle (upstream owning-channel
+      conversion is the registered fix); probe selection is round-robin
+      (deterministic coverage) with random selection a follow-up;
+      user-broadcast is direct fan-out to ALIVE members (epidemic relay
+      of USER frames = post-v1); PING_REQ relay remains open (folded into
+      G6's robustness work or post-v1).*
 
 f. **Spec** — [x] `docs/CajetaGossip.md` (present).
 
@@ -216,7 +232,8 @@ d. [ ] An N-node cluster converges and detects a killed node without false
    green (`cajeta test`).
 2. [x] **G3 transport** + **G4 join/leave** — done 2026-07-20 (126 checks
    green; upstream gates NET-1.5 + the new `recvFromAsync` both landed).
-3. [ ] **G5 dissemination** + **G6 cluster tests** — the full epidemic + the
-   multi-node convergence suite.
+3. [-] **G5 dissemination** done 2026-07-20 (128 checks); **G6 cluster
+   tests** remain — the multi-node convergence + kill-detection suite
+   under both `CAJETA_CARRIERS=1` and the default pool.
 4. [~] Multicast discovery (G4b) once cajeta **NET-14** ships; security +
    Lifeguard are post-v1.
