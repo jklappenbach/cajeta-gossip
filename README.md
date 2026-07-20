@@ -13,8 +13,12 @@ Cluster) is to ship membership as a library. Stdlib owns the transport
 primitives; gossip rides on top. (Same relationship Toffee has to the GPU stack.)
 
 - **Package:** `dev.cajeta.gossip` (reverse-DNS, per the `dev.cajeta.http` ecosystem convention)
-- **Status:** designed; Phase 0 (library build) done — builds as
-  `dev.cajeta.gossip` 0.1.0; the protocol is not yet implemented.
+- **Status:** v1 core complete (2026-07-20) — wire codec, SWIM membership
+  core, UDP transport binding, join/leave, epidemic dissemination with
+  incarnation-bump refutation, and the 5-node cluster suite: 130 checks
+  green under both `CAJETA_CARRIERS=1` and the default pool. Needs
+  cajeta ≥ 0.9.4 (the re-cut tag: view element arrays + the cross-file
+  view fix + `recvFromAsync` + `sleepMillis`).
 - **Spec:** [`docs/CajetaGossip.md`](docs/CajetaGossip.md)
 - **Plan:** [`plans/cajeta-gossip-plan.md`](plans/cajeta-gossip-plan.md)
 

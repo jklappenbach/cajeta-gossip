@@ -186,20 +186,38 @@ public final class GossipNode {
         // SYNC / LEAVE / USER: G4 / G5.
     }
 
-    /** Apply every piggybacked delta of `m` to the membership table. */
+    /**
+     * Apply every piggybacked delta of `m` to the membership table. A
+     * delta naming OURSELVES as SUSPECT/DEAD triggers the SWIM
+     * refutation (spec § How SWIM works): bump our incarnation past the
+     * accusation and gossip ALIVE(self) — the higher incarnation
+     * overrides the suspicion everywhere, which is what keeps the
+     * protocol from flapping on transient slowness.
+     */
     public void applyDeltas(GossipMessage m) {
+        int64 now = Clock.millisTime();
         int32 n = (int32) m.deltas.count();
         int32 k = 0;
         while (k < n) {
             Delta d = m.deltas[k];
             String dn = d.name;
-            if (!dn.equals(this.name)) {
+            if (dn.equals(this.name)) {
+                int8 selfSt = d.state;
+                if ((selfSt == (int8) MemberState.SUSPECT
+                        || selfSt == (int8) MemberState.DEAD)
+                        && d.incarnation >= this.incarnation) {
+                    this.incarnation = d.incarnation + 1;
+                    this.piggyback.offer((int8) MemberState.ALIVE,
+                                         this.incarnation, 0, 2130706433,
+                                         (int64) this.boundPort, this.name);
+                }
+            } else {
                 int8 st = d.state;
                 if (st == (int8) MemberState.ALIVE) {
                     this.membership.applyAlive(dn, d.addrHi, d.addrLo,
                                                (int64) d.port, d.incarnation);
                 } else if (st == (int8) MemberState.SUSPECT) {
-                    this.membership.applySuspect(dn, d.incarnation, 0);
+                    this.membership.applySuspect(dn, d.incarnation, now);
                 } else if (st == (int8) MemberState.DEAD) {
                     this.membership.applyDead(dn, d.incarnation);
                 } else if (st == (int8) MemberState.LEFT) {

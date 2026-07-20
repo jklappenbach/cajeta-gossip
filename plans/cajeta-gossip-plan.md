@@ -1,6 +1,12 @@
 # Plan: `cajeta-gossip` — SWIM cluster membership (external library)
 
-Status: **Phase 0 cleared (cajeta 0.9.2); G1/G2 unblocked.** Spec: [`../docs/CajetaGossip.md`](../docs/CajetaGossip.md).
+Status: **v1 core COMPLETE (2026-07-20)** — Phase 0 + G1–G6 all green
+(130 checks, both carrier modes). Open: the `Cluster`/`GossipConfig`
+public facade, PING_REQ relay, random probe selection, epidemic USER
+relay, piggyback compaction, owning-channel `events()`/`messages()`
+(all registered inline below); GOSSIP-4b multicast on NET-14; security
++ Lifeguard post-v1. Toolchain: cajeta ≥ 0.9.4 (re-cut — element
+arrays + view forward-reference fix + `recvFromAsync` + `sleepMillis`). Spec: [`../docs/CajetaGossip.md`](../docs/CajetaGossip.md).
 External sibling library (package `dev.cajeta.gossip`, following the
 `dev.cajeta.http` ecosystem naming) built on the `cajeta.io.net` stdlib
 transport — *not* part of stdlib.
@@ -137,11 +143,14 @@ e. **Dissemination + user data (G5)**
 
 f. **Cluster convergence / failure (G6)**
 
-   1. [ ] An N-node loopback cluster fully converges after staggered joins. →
-      `GossipClusterTests.nNodeConverges`.
-   2. [ ] Killing a node → the rest report it DEAD via `events()` within bounded
-      time; no false positives for a merely-slow node. →
-      `GossipClusterTests.deadDetectedNoFalsePositive`.
+   1. [x] An N-node loopback cluster fully converges after staggered joins
+      (5 nodes, protocol loops live from the start, two joins via
+      non-seeds; full N×(N-1) ALIVE matrix). → `GossipClusterTests.nNodeConverges`.
+   2. [x] Killing a node → every survivor records a DEAD event for it within
+      bounded time; no survivor ever records DEAD for a living node
+      (transient SUSPECTs legal — the newly-implemented incarnation-bump
+      refutation clears them; scheduling delays under load ARE the
+      merely-slow scenario). → `GossipClusterTests.deadDetectedNoFalsePositive`.
 
 ---
 
@@ -216,12 +225,13 @@ f. **Spec** — [x] `docs/CajetaGossip.md` (present).
 
 a. [x] **Phase 0 cleared:** the library build kind exists and this repo builds +
    publishes as a Cajeta library dependency. → `test/phase0.sh`
-b. [ ] The pure membership core passes its state-machine suite (§1.b) with no
+b. [x] The pure membership core passes its state-machine suite (§1.b) with no
    sockets.
-c. [ ] Over real loopback UDP, ping/ack + indirect probe + join/leave behave per
+c. [x] Over real loopback UDP, ping/ack + indirect probe + join/leave behave per
    §1.c–d.
-d. [ ] An N-node cluster converges and detects a killed node without false
-   positives (§1.f) under both `CAJETA_CARRIERS=1` and the default pool.
+d. [x] An N-node cluster converges and detects a killed node without false
+   positives (§1.f) under both `CAJETA_CARRIERS=1` and the default pool
+   (verified 2026-07-20, 130 checks each).
 
 ---
 
@@ -232,8 +242,7 @@ d. [ ] An N-node cluster converges and detects a killed node without false
    green (`cajeta test`).
 2. [x] **G3 transport** + **G4 join/leave** — done 2026-07-20 (126 checks
    green; upstream gates NET-1.5 + the new `recvFromAsync` both landed).
-3. [-] **G5 dissemination** done 2026-07-20 (128 checks); **G6 cluster
-   tests** remain — the multi-node convergence + kill-detection suite
-   under both `CAJETA_CARRIERS=1` and the default pool.
+3. [x] **G5 dissemination** + **G6 cluster tests** — done 2026-07-20
+   (130 checks green under BOTH `CAJETA_CARRIERS=1` and the default pool).
 4. [~] Multicast discovery (G4b) once cajeta **NET-14** ships; security +
    Lifeguard are post-v1.
