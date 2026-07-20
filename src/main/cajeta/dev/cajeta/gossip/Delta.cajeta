@@ -1,0 +1,22 @@
+package dev.cajeta.gossip;
+
+/**
+ * One piggybacked membership delta: `{name, address, state, incarnation}`
+ * (spec § Wire format). Rides in [`GossipMessage`](GossipMessage.cajeta)'s
+ * `deltas` element array; each entry is self-delimiting (fixed fields +
+ * length-prefixed name).
+ *
+ * The address is 16 bytes as two big-endian words — an IPv6 address, or
+ * IPv4 carried v4-mapped (`addrHi = 0`, low 32 bits of `addrLo` = the v4
+ * address).
+ */
+@BigEndian
+public view Delta {
+    /** [`MemberState`](MemberState.cajeta) ordinal. */
+    public int8   state;
+    public int64  incarnation;
+    public int64  addrHi;
+    public int64  addrLo;
+    public uint16 port;
+    public String name;
+}

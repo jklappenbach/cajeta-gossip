@@ -1,0 +1,28 @@
+package dev.cajeta.gossip;
+
+/**
+ * The single gossip datagram frame (spec § Wire format): header +
+ * piggybacked [`Delta`](Delta.cajeta) list + optional user payload.
+ * Big-endian throughout; every length prefix is validated at view
+ * construction, so field access after `GossipMessage(frame)` succeeds is
+ * bounds-check-free.
+ *
+ * Decode side of the codec; the encode side is
+ * [`WireWriter`](WireWriter.cajeta) (var-size view fields are not
+ * assignable — producers build the bytes, then overlay this view).
+ */
+@BigEndian
+public view GossipMessage {
+    /** [`Wire.MAGIC`](Wire.cajeta) — "GSWP". */
+    public int32   magic;
+    /** [`Wire.VERSION`](Wire.cajeta). */
+    public int8    version;
+    /** [`Wire.PING`](Wire.cajeta) .. [`Wire.USER`](Wire.cajeta). */
+    public int8    msgType;
+    public int64   senderIncarnation;
+    public String  senderName;
+    /** Piggybacked membership deltas — bounded by the MTU budget. */
+    public Delta[] deltas;
+    /** App bytes for `USER` frames; zero-length otherwise. */
+    public int8[]  payload;
+}

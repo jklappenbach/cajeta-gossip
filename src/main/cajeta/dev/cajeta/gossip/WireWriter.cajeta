@@ -1,0 +1,158 @@
+package dev.cajeta.gossip;
+
+/**
+ * Encode side of the wire codec: builds one
+ * [`GossipMessage`](GossipMessage.cajeta) frame inside a fixed
+ * [`Wire.MTU`](Wire.cajeta)-byte buffer, big-endian, and hands back an
+ * exact-size copy from [`finish`](#finish). Var-size view fields are not
+ * assignable (Views.md § Mutation rules), so producers write bytes here
+ * and consumers overlay the view.
+ *
+ * Usage (order matters — header, then deltas, then payload):
+ *
+ * ```cajeta
+ * WireWriter w = heap WireWriter();
+ * w.begin(Wire.PING, selfName, selfIncarnation);
+ * w.addDelta(state, inc, addrHi, addrLo, port, name);   // false = won't fit
+ * w.setPayload(bytes);                                   // USER frames only
+ * int8[] frame = w.finish();
+ * ```
+ *
+ * [`addDelta`](#addDelta) / [`setPayload`](#setPayload) return `false` —
+ * leaving the writer untouched — when the entry would push the frame past
+ * the MTU; the caller keeps the delta for the next frame (the piggyback
+ * queue's retransmit budget handles it).
+ */
+public final class WireWriter {
+    public int8[]  buf;
+    public int32   pos;
+    /** Buffer offset of the delta-count word (patched by addDelta). */
+    public int32   countPos;
+    public int32   deltaCount;
+    public boolean payloadDone;
+
+    public WireWriter() {
+        this.buf = heap int8[1400];
+        this.pos = 0;
+        this.countPos = 0;
+        this.deltaCount = 0;
+        this.payloadDone = false;
+    }
+
+    /** Start a frame: header + sender identity + a zero delta count. */
+    public void begin(int8 msgType, String senderName, int64 incarnation) {
+        this.pos = 0;
+        this.deltaCount = 0;
+        this.payloadDone = false;
+        this.u32(Wire.MAGIC);
+        this.buf[this.pos] = Wire.VERSION;
+        this.buf[this.pos + 1] = msgType;
+        this.pos = this.pos + 2;
+        this.u64(incarnation);
+        this.str(senderName);
+        this.countPos = this.pos;
+        this.u32(0);
+    }
+
+    /**
+     * Append one membership delta. Returns `false` (writer untouched) if
+     * the entry would overflow the MTU (reserving 4 bytes for the payload
+     * prefix `finish` must always emit) or if [`setPayload`](#setPayload)
+     * already ran (deltas precede the payload on the wire).
+     */
+    public boolean addDelta(int8 state, int64 incarnation, int64 addrHi,
+                            int64 addrLo, int64 port, String name) {
+        if (this.payloadDone) {
+            return false;
+        }
+        int32 need = 31 + name.byteLength();
+        if (this.pos + need + 4 > Wire.MTU) {
+            return false;
+        }
+        this.buf[this.pos] = state;
+        this.pos = this.pos + 1;
+        this.u64(incarnation);
+        this.u64(addrHi);
+        this.u64(addrLo);
+        this.u16(port);
+        this.str(name);
+        this.deltaCount = this.deltaCount + 1;
+        this.patchU32(this.countPos, this.deltaCount);
+        return true;
+    }
+
+    /**
+     * Set the app payload (`USER` frames). Returns `false` (writer
+     * untouched) if the bytes would overflow the MTU or a payload was
+     * already written.
+     */
+    public boolean setPayload(int8[] payload) {
+        if (this.payloadDone) {
+            return false;
+        }
+        if (this.pos + 4 + (int32) payload.count() > Wire.MTU) {
+            return false;
+        }
+        this.u32((int32) payload.count());
+        int32 i = 0;
+        while (i < (int32) payload.count()) {
+            this.buf[this.pos + i] = payload[i];
+            i = i + 1;
+        }
+        this.pos = this.pos + (int32) payload.count();
+        this.payloadDone = true;
+        return true;
+    }
+
+    /**
+     * Seal the frame: emits the empty-payload prefix if no payload was
+     * set, and returns an exact-size caller-owned copy. The writer can be
+     * reused with a fresh [`begin`](#begin).
+     */
+    public #int8[] finish() {
+        if (!this.payloadDone) {
+            this.u32(0);
+            this.payloadDone = true;
+        }
+        int8[] out = heap int8[this.pos];
+        int32 i = 0;
+        while (i < this.pos) {
+            out[i] = this.buf[i];
+            i = i + 1;
+        }
+        return out;
+    }
+
+    private void u32(int64 v) {
+        this.patchU32(this.pos, v);
+        this.pos = this.pos + 4;
+    }
+
+    private void patchU32(int32 at, int64 v) {
+        this.buf[at]     = (int8) ((v >> 24) & 255);
+        this.buf[at + 1] = (int8) ((v >> 16) & 255);
+        this.buf[at + 2] = (int8) ((v >> 8) & 255);
+        this.buf[at + 3] = (int8) (v & 255);
+    }
+
+    private void u64(int64 v) {
+        this.u32((v >> 32) & 4294967295);
+        this.u32(v & 4294967295);
+    }
+
+    private void u16(int64 v) {
+        this.buf[this.pos]     = (int8) ((v >> 8) & 255);
+        this.buf[this.pos + 1] = (int8) (v & 255);
+        this.pos = this.pos + 2;
+    }
+
+    private void str(String s) {
+        this.u32(s.byteLength());
+        int32 i = 0;
+        while (i < s.byteLength()) {
+            this.buf[this.pos + i] = s.byteAt(i);
+            i = i + 1;
+        }
+        this.pos = this.pos + s.byteLength();
+    }
+}

@@ -1,0 +1,43 @@
+package dev.cajeta.gossip.test;
+
+// Minimal assertion collector: prints FAIL per failed check, counts both.
+// The suite passes iff failures == 0 (TestMain's exit code). Same shape as
+// dev.cajeta.http's test harness (testkit is not published yet).
+public final class Check {
+    public int32 failures;
+    public int32 passes;
+
+    public Check() {
+        this.failures = 0;
+        this.passes = 0;
+    }
+
+    public void that(boolean cond, String label) {
+        if (cond) {
+            this.passes = this.passes + 1;
+        } else {
+            this.failures = this.failures + 1;
+            System.stdout.println("  FAIL {}", label);
+        }
+    }
+
+    public void eqStr(String actual, String expected, String label) {
+        if (actual.equals(expected)) {
+            this.passes = this.passes + 1;
+        } else {
+            this.failures = this.failures + 1;
+            System.stdout.println("  FAIL {}: expected '{}', got '{}'",
+                                  label, expected, actual);
+        }
+    }
+
+    public void eqInt(int64 actual, int64 expected, String label) {
+        if (actual == expected) {
+            this.passes = this.passes + 1;
+        } else {
+            this.failures = this.failures + 1;
+            System.stdout.println("  FAIL {}: expected {}, got {}",
+                                  label, expected, actual);
+        }
+    }
+}

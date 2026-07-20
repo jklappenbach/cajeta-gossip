@@ -1,0 +1,116 @@
+package dev.cajeta.gossip.test;
+
+import dev.cajeta.gossip.Wire;
+import dev.cajeta.gossip.WireWriter;
+import dev.cajeta.gossip.GossipMessage;
+import dev.cajeta.gossip.Delta;
+import dev.cajeta.gossip.MemberState;
+
+// G1 — wire format (plan §1.a). Encode with WireWriter (var-size view
+// fields are not assignable — encode is writer-side by design), decode by
+// overlaying the GossipMessage view (zero-copy, validated once at
+// construction).
+public final class GossipWireTests {
+
+    public static void run(Check c) {
+        System.stdout.println("GossipWireTests");
+        roundTripAllMessageTypes(c);
+        rejectsOverMtu(c);
+    }
+
+    // §1.a.1 — golden encode/decode round-trip for every message type,
+    // including a two-entry piggyback delta list; USER carries a payload.
+    public static void roundTripAllMessageTypes(Check c) {
+        int8 t = Wire.PING;
+        while (t <= Wire.USER) {
+            int8[] frame = encodeGolden(t);
+            GossipMessage m = GossipMessage(frame);
+
+            c.eqInt(m.magic, Wire.MAGIC, "magic");
+            c.eqInt(m.version, Wire.VERSION, "version");
+            c.eqInt(m.msgType, t, "msgType");
+            c.eqInt(m.senderIncarnation, 42, "senderIncarnation");
+            String sn = m.senderName;
+            c.eqStr(sn, "node-a:7946", "senderName");
+
+            c.eqInt(m.deltas.count(), 2, "delta count");
+            c.eqInt(m.deltas[0].state, (int8) MemberState.ALIVE, "d0.state");
+            c.eqInt(m.deltas[0].incarnation, 7, "d0.incarnation");
+            c.eqInt(m.deltas[0].port, 7947, "d0.port");
+            String n0 = m.deltas[0].name;
+            c.eqStr(n0, "node-b:7947", "d0.name");
+            c.eqInt(m.deltas[1].state, (int8) MemberState.SUSPECT, "d1.state");
+            c.eqInt(m.deltas[1].incarnation, 9, "d1.incarnation");
+            c.eqInt(m.deltas[1].addrLo, 2130706434, "d1.addrLo");
+            String n1 = m.deltas[1].name;
+            c.eqStr(n1, "node-c:7948", "d1.name");
+
+            int8[] pl = m.payload;
+            if (t == Wire.USER) {
+                c.eqInt(pl.count(), 2, "payload len");
+                c.eqInt(pl[0], 55, "payload[0]");
+                c.eqInt(pl[1], 66, "payload[1]");
+            } else {
+                c.eqInt(pl.count(), 0, "empty payload");
+            }
+            t = (int8) (t + 1);
+        }
+    }
+
+    private static #int8[] encodeGolden(int8 msgType) {
+        WireWriter w = heap WireWriter();
+        w.begin(msgType, "node-a:7946", 42);
+        c1(w.addDelta((int8) MemberState.ALIVE, 7, 0, 2130706433, 7947,
+                      "node-b:7947"));
+        c1(w.addDelta((int8) MemberState.SUSPECT, 9, 0, 2130706434, 7948,
+                      "node-c:7948"));
+        if (msgType == Wire.USER) {
+            int8[] pay = heap int8[2];
+            pay[0] = (int8) 55;
+            pay[1] = (int8) 66;
+            c1(w.setPayload(pay));
+        }
+        return w.finish();
+    }
+
+    // Tiny helper: golden-path writer calls must succeed; a false here is
+    // a test-setup bug, surfaced loudly.
+    private static void c1(boolean ok) {
+        if (!ok) {
+            System.stdout.println("  FAIL golden writer call rejected");
+        }
+    }
+
+    // §1.a.2 — the writer refuses anything that would push the datagram
+    // past the MTU cap; the refused call leaves the writer intact.
+    public static void rejectsOverMtu(Check c) {
+        // A ~700-byte name: two such deltas would blow the 1400-byte cap.
+        String big = "x";
+        int32 i = 0;
+        while (i < 9) {                    // doubles: 1 -> 512
+            big = big + big;
+            i = i + 1;
+        }
+        big = big + big.substring(0, 188); // 512 + 188 = 700 bytes
+
+        WireWriter w = heap WireWriter();
+        w.begin(Wire.PING, "node-a:7946", 1);
+        c.that(w.addDelta((int8) 0, 1, 0, 1, 1, big), "first big delta fits");
+        c.that(!w.addDelta((int8) 0, 2, 0, 2, 2, big), "second big delta rejected");
+
+        // Writer still usable after a rejection: a small delta fits and the
+        // frame decodes with exactly the accepted entries.
+        c.that(w.addDelta((int8) 1, 3, 0, 3, 3, "small"), "small delta fits after rejection");
+        int8[] frame = w.finish();
+        c.that(frame.count() <= Wire.MTU, "frame within MTU");
+        GossipMessage m = GossipMessage(frame);
+        c.eqInt(m.deltas.count(), 2, "accepted delta count");
+        c.eqInt(m.deltas[1].incarnation, 3, "post-rejection delta intact");
+
+        // Oversized payload rejected too.
+        WireWriter w2 = heap WireWriter();
+        w2.begin(Wire.USER, "n", 1);
+        int8[] huge = heap int8[1500];
+        c.that(!w2.setPayload(huge), "oversized payload rejected");
+    }
+}

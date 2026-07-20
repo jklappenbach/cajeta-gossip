@@ -25,7 +25,7 @@
         // 0.9.2 is the first toolchain with the library archetype + the
         // external-library ecosystem (dev.cajeta.http precedent).
         "toolchain": {
-            "version": "0.9.2"
+            "version": "0.9.4"
         },
 
         // The full library needs UDP sockets; capabilities are re-validated
@@ -65,10 +65,19 @@
         },
 
         "test": {
+            // testkit is unpublished (same situation as dev.cajeta.http):
+            // the suite is an ordinary self-checking binary — test/src
+            // compiled against the built .cja via --classpath; exit 0 iff
+            // every check passes.
             "description": "Build + run the library's unit tests",
             "actions": [
                 { "action": "build", "flavor": "debug", "id": "art" },
-                { "action": "test", "params": { "input": "${art.path}" } }
+                { "action": "exec", "command": "cajeta",
+                  "args": [ "dev.cajeta.gossip.test.TestMain::main",
+                            "test/src", "build/test",
+                            "--emit=exe", "--classpath=${art.path}",
+                            "-o", "build/test/gossip-tests" ] },
+                { "action": "test", "input": "build/test/gossip-tests" }
             ]
         },
 

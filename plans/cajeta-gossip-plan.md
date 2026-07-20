@@ -78,17 +78,16 @@ Olla), whose reverse-DNS naming this repo now follows: **`dev.cajeta.gossip`**.
 
 a. **Wire format (G1)**
 
-   1. [~] Golden encode/decode round-trip for each message type (`PING`/`ACK`/
+   1. [x] Golden encode/decode round-trip for each message type (`PING`/`ACK`/
       `PING_REQ`/`SYNC`/`LEAVE`/`USER`) incl. a piggyback delta list. →
-      `GossipWireTests.roundTripAllMessageTypes`.
-      *BLOCKED → upstream view v1.1: the piggyback list needs arrays of
-      var-size elements (`Delta[]` with a `String` name per delta) —
-      `docs/specification/lang/Views.md` defers this to v1.1; 0.9.2 views
-      support fixed fields + `String` + primitive `T[]` only. Decision
-      2026-07-19: grow the compiler rather than bend the wire format
-      (fixed-K slots / manual codec rejected).*
-   2. [~] Oversized payload / delta list is rejected (stays inside the MTU cap). →
-      `GossipWireTests.rejectsOverMtu`. *BLOCKED → same view v1.1 gate.*
+      `GossipWireTests.roundTripAllMessageTypes` (2026-07-20, green vs the
+      view-element-arrays toolchain + the cross-file view-forward-reference
+      fix `46f7b1db` — found HERE: GossipMessage.cajeta parses before
+      Delta.cajeta in raw directory order, and forward-referenced views got
+      propertyless class placeholders).
+   2. [x] Oversized payload / delta list is rejected (stays inside the MTU
+      cap; rejection leaves the writer intact; oversized payload rejected
+      too). → `GossipWireTests.rejectsOverMtu`.
 
 b. **Membership state machine (G2) — pure, no sockets**
 
@@ -138,9 +137,11 @@ f. **Cluster convergence / failure (G6)**
 
 a. **Wire format** · `gossip` (G1)
 
-   1. [~] `view`-based message codec: header + bounded membership-delta list +
-      optional user payload. `GOSSIP-1`. *BLOCKED → upstream view v1.1
-      (var-size element arrays); see §1.a.*
+   1. [x] `view`-based message codec: header + bounded membership-delta list +
+      optional user payload. `GOSSIP-1` — `Wire` (constants),
+      `Delta`/`GossipMessage` (@BigEndian views, decode side),
+      `WireWriter` (encode side; MTU-budgeted addDelta/setPayload).
+      Requires a toolchain carrying upstream `46f7b1db`.
 
 b. **Membership core** · `gossip` (G2) — pure/deterministic
 

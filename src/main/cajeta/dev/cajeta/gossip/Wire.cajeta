@@ -1,0 +1,35 @@
+package dev.cajeta.gossip;
+
+/**
+ * Wire-format constants (spec `docs/CajetaGossip.md` § Wire format).
+ *
+ * A gossip datagram is a single [`GossipMessage`](GossipMessage.cajeta)
+ * frame, capped at [`MTU`](#MTU) bytes so it never fragments at the IP
+ * layer. Encode with [`WireWriter`](WireWriter.cajeta); decode by
+ * overlaying the `GossipMessage` view (zero-copy, validated once at
+ * construction — a malformed frame throws there).
+ */
+public final class Wire {
+    /** Frame magic — "GSWP" big-endian. */
+    public static final int32 MAGIC = 1196582736;
+    /** Wire format version this library speaks. */
+    public static final int8 VERSION = 1;
+
+    /** Direct probe. */
+    public static final int8 PING = 0;
+    /** Probe / indirect-probe acknowledgement. */
+    public static final int8 ACK = 1;
+    /** Indirect probe request ("ping the target for me"). */
+    public static final int8 PING_REQ = 2;
+    /** Full membership snapshot (join-time anti-entropy). */
+    public static final int8 SYNC = 3;
+    /** Graceful departure announcement. */
+    public static final int8 LEAVE = 4;
+    /** Application payload broadcast. */
+    public static final int8 USER = 5;
+
+    /** Conservative datagram cap: stay inside a 1500-byte Ethernet MTU
+     *  with IP+UDP headers to spare — no IP fragmentation. */
+    public static final int32 MTU = 1400;
+
+}
