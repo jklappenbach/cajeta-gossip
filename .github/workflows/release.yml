@@ -1,0 +1,24 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Builds the library .cja on every PR; on a v* tag also publishes a GitHub
+# Release and a signed publish to Olla (olla.cajeta.dev). Logic lives in the
+# reusable workflow — same wiring as dev.cajeta.http.
+jobs:
+  release:
+    uses: jklappenbach/cajeta/.github/workflows/lib-release.yml@main
+    with:
+      # First toolchain that can compile this repo: view element arrays
+      # (the wire format's Delta[] piggyback list), the cross-file view
+      # forward-reference fix, UdpSocket.recvFromAsync, Tasks.sleepMillis.
+      cajeta-version: v0.9.4
+    secrets: inherit
