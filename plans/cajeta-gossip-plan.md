@@ -116,9 +116,12 @@ c. **Transport binding (G3)**
 
 d. **Join / leave (G4)**
 
-   1. [ ] A joining node contacts a unicast seed, receives a `SYNC` snapshot,
-      and appears in the seed's ALIVE view. → `GossipJoinLeaveTests.joinViaSeedConverges`.
-   2. [ ] `leave()` gossips a graceful departure; peers mark it LEFT. →
+   1. [x] A joining node contacts a unicast seed, receives a `SYNC` snapshot
+      (the seed itself + everything it knew, with real learned addresses),
+      and appears in the seed's ALIVE view. →
+      `GossipJoinLeaveTests.joinViaSeedConverges`.
+   2. [x] `leave()` gossips a graceful departure; peers mark it LEFT
+      (authoritative — no suspicion round). →
       `GossipJoinLeaveTests.gracefulLeave`.
    3. [~] Join via multicast discovery group. *DEFERRED → needs NET-14.* →
       `GossipJoinLeaveTests.joinViaMulticastDiscovery`.
@@ -174,8 +177,14 @@ c. **Transport + protocol loop** · `gossip` (G3)
 
 d. **Join / leave / discovery** · `gossip` (G4)
 
-   1. [ ] `Cluster.join(cfg)` (unicast seed contact + `SYNC`) and `leave()`.
-      `GOSSIP-4`.
+   1. [x] Join (unicast seed contact + `SYNC` request/response with a
+      one-byte request-marker payload — responses are empty-marked so
+      replies never re-reply) and `leave()` (LEAVE to every ALIVE member
+      via the table's learned addresses — `addrOf` builds the socket
+      address from the delta's v4-mapped word + port). `GOSSIP-4` on
+      `GossipNode`; the spec's `Cluster`/`GossipConfig` facade lands with
+      G5's `events()`/`broadcast()`/`messages()` channels, which complete
+      its surface.
    2. [~] Multicast discovery group. *DEFERRED → on cajeta NET-14.* `GOSSIP-4b`.
 
 e. **Dissemination + app API** · `gossip` (G5)
@@ -205,8 +214,8 @@ d. [ ] An N-node cluster converges and detects a killed node without false
 0. [x] **Phase 0 — library build** (cleared by cajeta 0.9.2; `test/phase0.sh`).
 1. [x] **G1 wire** → **G2 core** (socket-free) — done 2026-07-20, 122 checks
    green (`cajeta test`).
-2. [ ] **G3 transport** + **G4 join/leave** — gated on cajeta **NET-1.5**
-   executing.
+2. [x] **G3 transport** + **G4 join/leave** — done 2026-07-20 (126 checks
+   green; upstream gates NET-1.5 + the new `recvFromAsync` both landed).
 3. [ ] **G5 dissemination** + **G6 cluster tests** — the full epidemic + the
    multi-node convergence suite.
 4. [~] Multicast discovery (G4b) once cajeta **NET-14** ships; security +

@@ -10,6 +10,7 @@ public final class TestMain {
         GossipWireTests.run(c);
         GossipMembershipTests.run(c);
         GossipTransportTests.run(c);
+        GossipJoinLeaveTests.run(c);
 
         System.stdout.println("");
         System.stdout.println("=== {} passed, {} failed ===",

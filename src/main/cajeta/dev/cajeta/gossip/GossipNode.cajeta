@@ -124,6 +124,17 @@ public final class GossipNode {
             this.membership.applyAlive(sender, 0, 2130706433,
                                        from.getPort(), m.senderIncarnation);
             this.acks.send(sender.hash());
+        } else if (t == Wire.SYNC) {
+            // Apply the snapshot's deltas, then answer a REQUEST (non-empty
+            // payload marker) with our own snapshot — response payloads are
+            // empty, so replies never re-reply (no sync storms).
+            this.applyDeltas(m);
+            int8[] marker = m.payload;
+            if ((int32) marker.count() > 0) {
+                this.sendSnapshot(from);
+            }
+        } else if (t == Wire.LEAVE) {
+            this.membership.applyLeft(sender);
         } else if (t == Wire.PING_REQ) {
             // Recorded for G3; the relay (probe target on origin's behalf)
             // is the G5 refinement.
@@ -140,6 +151,107 @@ public final class GossipNode {
             this.lastPingReqTarget = #tgt;
         }
         // SYNC / LEAVE / USER: G4 / G5.
+    }
+
+    /** Apply every piggybacked delta of `m` to the membership table. */
+    public void applyDeltas(GossipMessage m) {
+        int32 n = (int32) m.deltas.count();
+        int32 k = 0;
+        while (k < n) {
+            Delta d = m.deltas[k];
+            String dn = d.name;
+            if (!dn.equals(this.name)) {
+                int8 st = d.state;
+                if (st == (int8) MemberState.ALIVE) {
+                    this.membership.applyAlive(dn, d.addrHi, d.addrLo,
+                                               (int64) d.port, d.incarnation);
+                } else if (st == (int8) MemberState.SUSPECT) {
+                    this.membership.applySuspect(dn, d.incarnation, 0);
+                } else if (st == (int8) MemberState.DEAD) {
+                    this.membership.applyDead(dn, d.incarnation);
+                } else if (st == (int8) MemberState.LEFT) {
+                    this.membership.applyLeft(dn);
+                }
+            }
+            k = k + 1;
+        }
+    }
+
+    /** Build a member's socket address from its table entry (v4-mapped
+     *  address word + port). */
+    public #SocketAddress addrOf(Member m) {
+        int32 v4 = (int32) m.addrLo;
+        IpAddress ip = IpAddress.fromV4((v4 >> 24) & 255, (v4 >> 16) & 255,
+                                        (v4 >> 8) & 255, v4 & 255);
+        return SocketAddress.of(#ip, (int32) m.port);
+    }
+
+    /** SYNC snapshot to `dest`: our own delta first, then every ALIVE
+     *  member, MTU-budgeted (addDelta stops accepting at the cap — the
+     *  join-time sync is bounded by design; anti-entropy beyond it is out
+     *  of scope for v1). Empty payload = response (never re-replied). */
+    public void sendSnapshot(SocketAddress dest) {
+        this.writer.begin(Wire.SYNC, this.name, this.incarnation);
+        this.writer.addDelta((int8) MemberState.ALIVE, this.incarnation,
+                             0, 2130706433, (int64) this.boundPort, this.name);
+        int32 i = 0;
+        while (i < this.membership.names.count()) {
+            Member m = this.membership.get(this.membership.names.get(i));
+            if (m.state == MemberState.ALIVE) {
+                this.writer.addDelta((int8) MemberState.ALIVE, m.incarnation,
+                                     m.addrHi, m.addrLo, m.port, m.name);
+            }
+            i = i + 1;
+        }
+        int8[] frame = this.writer.finish();
+        this.sock.sendTo(frame, 0, (int32) frame.count(), dest);
+    }
+
+    /**
+     * Join via a unicast seed at loopback `seedPort` (G4): send a SYNC
+     * REQUEST (our own delta + a one-byte request marker payload) and wait
+     * up to `timeoutMs` for the seed's snapshot to land — success = the
+     * table grew. The seed learns us from our delta; we learn the seed and
+     * everything it knew from the response.
+     */
+    public boolean join(int32 seedPort, int32 timeoutMs) {
+        int32 before = this.membership.names.count();
+        IpAddress lo = IpAddress.loopbackV4();
+        SocketAddress dest = SocketAddress.of(#lo, seedPort);
+        this.writer.begin(Wire.SYNC, this.name, this.incarnation);
+        this.writer.addDelta((int8) MemberState.ALIVE, this.incarnation,
+                             0, 2130706433, (int64) this.boundPort, this.name);
+        int8[] req = heap int8[1];
+        req[0] = (int8) 1;
+        this.writer.setPayload(req);
+        int8[] frame = this.writer.finish();
+        this.sock.sendTo(frame, 0, (int32) frame.count(), dest);
+
+        int32 waited = 0;
+        while (waited < timeoutMs) {
+            if (this.membership.names.count() > before) {
+                return true;
+            }
+            Tasks.sleepMillis(5);
+            waited = waited + 5;
+        }
+        return false;
+    }
+
+    /** Graceful departure: gossip a LEAVE to every ALIVE member. Peers
+     *  mark us LEFT immediately — no suspicion round. */
+    public void leave() {
+        this.writer.begin(Wire.LEAVE, this.name, this.incarnation);
+        int8[] frame = this.writer.finish();
+        int32 i = 0;
+        while (i < this.membership.names.count()) {
+            Member m = this.membership.get(this.membership.names.get(i));
+            if (m.state == MemberState.ALIVE) {
+                SocketAddress dest = this.addrOf(m);
+                this.sock.sendTo(frame, 0, (int32) frame.count(), dest);
+            }
+            i = i + 1;
+        }
     }
 
     /**

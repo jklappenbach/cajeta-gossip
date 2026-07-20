@@ -1,0 +1,107 @@
+package dev.cajeta.gossip.test;
+
+import dev.cajeta.gossip.GossipNode;
+import dev.cajeta.gossip.Member;
+import dev.cajeta.gossip.MemberState;
+import cajeta.concurrent.Tasks;
+import cajeta.lang.Optional;
+
+// G4 — join / leave (plan §1.d): unicast seed contact with a SYNC
+// snapshot, and the graceful departure broadcast.
+public final class GossipJoinLeaveTests {
+
+    public static async void runNode(GossipNode n) {
+        n.receiveLoop();
+    }
+
+    public static void run(Check c) {
+        System.stdout.println("GossipJoinLeaveTests");
+        joinViaSeedConverges(c);
+        gracefulLeave(c);
+    }
+
+    // §1.d.1 — the joiner contacts a unicast seed, receives the SYNC
+    // snapshot (the seed itself + everything the seed knows), and lands in
+    // the seed's ALIVE view.
+    public static void joinViaSeedConverges(Check c) {
+        () -> int32 body = () -> {
+            GossipNode s = heap GossipNode("seed", 5000);
+            GossipNode j = heap GossipNode("joiner", 5000);
+            // The seed already knows one other member.
+            s.table().applyAlive("m", 0, 2130706433, 1, 3);
+            int32 result = 0;
+            scope {
+                spawn runNode(s);
+                spawn runNode(j);
+                boolean ok = j.join(s.port(), 1000);
+                if (!ok) {
+                    result = 10;               // no snapshot arrived
+                } else {
+                    Member seedEntry = j.table().get("seed");
+                    Member mEntry = j.table().get("m");
+                    Member joinerAtSeed = s.table().get("joiner");
+                    if (seedEntry == null
+                            || seedEntry.state != MemberState.ALIVE) {
+                        result = 11;           // joiner doesn't know the seed
+                    } else if (mEntry == null || mEntry.incarnation != 3) {
+                        result = 12;           // snapshot didn't carry m
+                    } else if (joinerAtSeed == null
+                            || joinerAtSeed.state != MemberState.ALIVE) {
+                        result = 13;           // seed doesn't know the joiner
+                    } else if ((int32) joinerAtSeed.port != j.port()) {
+                        result = 14;           // joiner's address not learned
+                    } else {
+                        result = 1;
+                    }
+                }
+                s.stop();
+                j.stop();
+            }
+            return result;
+        };
+        int32 r = Tasks.runBlocking<int32>(body);
+        c.eqInt(r, 1, "join via seed converges (code " + r + ")");
+    }
+
+    // §1.d.2 — leave() gossips a graceful departure; peers mark the node
+    // LEFT (authoritative over ALIVE, no suspicion round).
+    public static void gracefulLeave(Check c) {
+        () -> int32 body = () -> {
+            GossipNode a = heap GossipNode("a", 5000);
+            GossipNode b = heap GossipNode("b", 5000);
+            int32 result = 0;
+            scope {
+                spawn runNode(a);
+                spawn runNode(b);
+                boolean ok = b.join(a.port(), 1000);
+                if (!ok) {
+                    result = 10;
+                } else {
+                    b.leave();
+                    // The LEAVE datagram is in flight — poll briefly.
+                    int32 waited = 0;
+                    boolean left = false;
+                    while (waited < 500 && !left) {
+                        Member m = a.table().get("b");
+                        if (m != null && m.state == MemberState.LEFT) {
+                            left = true;
+                        } else {
+                            Tasks.sleepMillis(10);
+                            waited = waited + 10;
+                        }
+                    }
+                    if (left) {
+                        result = 1;
+                    } else {
+                        result = 11;           // never marked LEFT
+                    }
+                }
+                a.stop();
+                b.stop();
+            }
+            return result;
+        };
+        int32 r = Tasks.runBlocking<int32>(body);
+        c.eqInt(r, 1, "graceful leave marks LEFT (code " + r + ")");
+    }
+}
