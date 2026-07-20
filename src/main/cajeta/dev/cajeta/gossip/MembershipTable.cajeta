@@ -50,8 +50,15 @@ public final class MembershipTable {
                               int64 port, int64 incarnation) {
         if (!this.members.containsKey(name)) {
             Member fresh = heap Member(name, addrHi, addrLo, port, incarnation);
-            this.members.put(name, fresh);
-            this.names.add(name);
+            // The names list stores its own copy (ArrayList aliases
+            // borrowed stores); the map takes OWNERSHIP of the member
+            // (`#` — a borrowed put would drop `fresh` at scope exit and
+            // alias every entry to the recycled allocation).
+            int8[] nb = name.toBytes();
+            int32 n = (int32) nb.count();
+            String nameCopy = heap String(#nb, n);
+            this.names.add(#nameCopy);
+            this.members.put(name, #fresh);
             return true;
         }
         Member m = this.members.get(name);

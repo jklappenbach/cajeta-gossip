@@ -1,0 +1,219 @@
+package dev.cajeta.gossip;
+
+import cajeta.lang.Optional;
+import cajeta.io.net.UdpSocket;
+import cajeta.io.net.SocketAddress;
+import cajeta.io.net.IpAddress;
+import cajeta.io.net.RecvResult;
+import cajeta.concurrent.Tasks;
+import cajeta.concurrent.Channel;
+import cajeta.time.Duration;
+
+/**
+ * G3 — the transport binding (spec § Runtime integration): one node's
+ * [`UdpSocket`](../../../cajeta/io/net/UdpSocket.cajeta) +
+ * [`MembershipTable`](MembershipTable.cajeta), a **receive fiber**
+ * ([`receiveLoop`](#receiveLoop) — parks on the reactor between datagrams
+ * via `recvFromAsync`), and the SWIM probe cycle
+ * ([`probe`](#probe): direct `PING`, then `k` indirect `PING_REQ`s, then
+ * suspicion).
+ *
+ * G3 scope notes:
+ *   - Loopback-only addressing (`127.0.0.1:<port>` from the member entry's
+ *     port) — real address plumbing from `Delta.addrHi/addrLo` lands with
+ *     join/SYNC (G4).
+ *   - `PING_REQ` receipt is recorded but not yet relayed (the helper
+ *     probing the target on the origin's behalf is the G5 refinement);
+ *     the ping-req fan-out and the suspicion verdict are G3's cycle.
+ *   - Acks flow from the receive fiber to the prober through a
+ *     [`Channel`](../../../cajeta/concurrent/Channel.cajeta), waited on
+ *     under `Tasks.withTimeout` — no polling, no busy-spin.
+ */
+public final class GossipNode {
+    public String name;
+    public int64 incarnation;
+    public UdpSocket sock;
+    public int32 boundPort;
+    public MembershipTable membership;
+    /** Ack signals from the receive fiber to the prober — name HASHES
+     *  (the Channel lends its slots, so borrowed Strings would dangle;
+     *  primitives are safe by value). */
+    public Channel<int64> acks;
+    public WireWriter writer;
+    public boolean running;
+    /** `k` — indirect probes per failed direct probe (default 3). */
+    public int32 indirectK;
+
+    // G3 observability (pinned by GossipTransportTests).
+    public int32 pingReqSeen;
+    public String lastPingReqTarget;
+
+    public GossipNode(String name, int64 suspectTimeoutMillis) {
+        this.name = name;
+        this.incarnation = 1;
+        IpAddress lo = IpAddress.loopbackV4();
+        SocketAddress bindAddr = SocketAddress.of(#lo, 0);
+        this.sock = UdpSocket.bind(bindAddr);
+        SocketAddress local = this.sock.localAddress();
+        this.boundPort = local.getPort();
+        this.membership = heap MembershipTable(suspectTimeoutMillis);
+        this.acks = heap Channel<int64>(16);
+        this.writer = heap WireWriter();
+        this.running = true;
+        this.indirectK = 3;
+        this.pingReqSeen = 0;
+        this.lastPingReqTarget = "";
+    }
+
+    public int32 port() { return this.boundPort; }
+    public MembershipTable table() { return this.membership; }
+
+    /**
+     * The receive fiber's body: park on the reactor until a datagram
+     * arrives, decode, dispatch. Malformed frames are dropped (the view
+     * constructor's validation throws; gossip is best-effort). Run it as
+     * `spawn node.receiveLoop()`; unblock it with [`stop`](#stop).
+     */
+    /** `spawn` trampoline (spawn takes bare class-method calls only). */
+    public static async void runReceiveLoop(GossipNode n) {
+        n.receiveLoop();
+    }
+
+    public void receiveLoop() {
+        int8[] buf = heap int8[1500];
+        while (this.running) {
+            RecvResult r = this.sock.recvFromAsync(buf, 0, 1500);
+            if (!this.running) {
+                return;
+            }
+            try {
+                this.handleFrame(buf, r.getFrom());
+            } catch (Exception e) {
+                // malformed datagram — drop (best-effort protocol)
+            }
+        }
+    }
+
+    /** Stop the node: clears the flag and pokes the socket so a parked
+     *  receive fiber wakes and exits. */
+    public void stop() {
+        this.running = false;
+        int8[] poke = heap int8[1];
+        poke[0] = (int8) 0;
+        IpAddress lo = IpAddress.loopbackV4();
+        SocketAddress self = SocketAddress.of(#lo, this.boundPort);
+        this.sock.sendTo(poke, 0, 1, self);
+    }
+
+    /** Decode one frame and dispatch by message type. */
+    public void handleFrame(int8[] buf, SocketAddress from) {
+        GossipMessage m = GossipMessage(buf);
+        if (m.magic != Wire.MAGIC) {
+            return;
+        }
+        int8 t = m.msgType;
+        String sender = m.senderName;
+        if (t == Wire.PING) {
+            // Reply with a bare ACK carrying our identity.
+            this.writer.begin(Wire.ACK, this.name, this.incarnation);
+            int8[] ack = this.writer.finish();
+            this.sock.sendTo(ack, 0, (int32) ack.count(), from);
+        } else if (t == Wire.ACK) {
+            // Direct evidence of life: upsert the sender ALIVE (loopback
+            // v4-mapped; real address plumbing is G4) and signal the prober.
+            this.membership.applyAlive(sender, 0, 2130706433,
+                                       from.getPort(), m.senderIncarnation);
+            this.acks.send(sender.hash());
+        } else if (t == Wire.PING_REQ) {
+            // Recorded for G3; the relay (probe target on origin's behalf)
+            // is the G5 refinement.
+            this.pingReqSeen = this.pingReqSeen + 1;
+            int8[] pl = m.payload;
+            int32 n = (int32) pl.count();
+            int8[] copy = heap int8[n];
+            int32 i = 0;
+            while (i < n) {
+                copy[i] = pl[i];
+                i = i + 1;
+            }
+            String tgt = heap String(#copy, n);
+            this.lastPingReqTarget = #tgt;
+        }
+        // SYNC / LEAVE / USER: G4 / G5.
+    }
+
+    /**
+     * One SWIM probe cycle against `target` at loopback `targetPort`:
+     * direct `PING`, ack awaited `timeoutMs` under `Tasks.withTimeout`;
+     * on miss, `k` `PING_REQ`s (payload = target name) to other live
+     * members, one more ack window; still nothing → the failure
+     * detector's verdict ([`MembershipTable.probeFailed`](MembershipTable.cajeta#probeFailed)
+     * at `now`). Returns whether an ack for `target` arrived.
+     */
+    public boolean probe(String target, int32 targetPort, int32 timeoutMs,
+                         int64 now) {
+        IpAddress lo = IpAddress.loopbackV4();
+        SocketAddress dest = SocketAddress.of(#lo, targetPort);
+        this.writer.begin(Wire.PING, this.name, this.incarnation);
+        int8[] ping = this.writer.finish();
+        this.sock.sendTo(ping, 0, (int32) ping.count(), dest);
+
+        if (this.awaitAckWithin(target, timeoutMs)) {
+            return true;
+        }
+
+        // Indirect round: PING_REQ(target) to up to k other live members.
+        int8[] targetBytes = target.toBytes();
+        int32 sentReqs = 0;
+        int32 i = 0;
+        while (i < this.membership.names.count() && sentReqs < this.indirectK) {
+            String peer = this.membership.names.get(i);
+            if (!peer.equals(this.name) && !peer.equals(target)) {
+                Member pm = this.membership.get(peer);
+                if (pm.state == MemberState.ALIVE) {
+                    this.writer.begin(Wire.PING_REQ, this.name, this.incarnation);
+                    this.writer.setPayload(targetBytes);
+                    int8[] req = this.writer.finish();
+                    IpAddress plo = IpAddress.loopbackV4();
+                    SocketAddress pdest = SocketAddress.of(#plo, (int32) pm.port);
+                    this.sock.sendTo(req, 0, (int32) req.count(), pdest);
+                    sentReqs = sentReqs + 1;
+                }
+            }
+            i = i + 1;
+        }
+
+        if (sentReqs > 0 && this.awaitAckWithin(target, timeoutMs)) {
+            return true;
+        }
+        this.membership.probeFailed(target, now);
+        return false;
+    }
+
+    /**
+     * Drain the ack channel until an ack for `target` arrives or
+     * `timeoutMs` elapses. Bounded polling with a cooperative fiber sleep
+     * ([`Tasks.sleepMillis`](../../../cajeta/concurrent/Tasks.cajeta#sleepMillis))
+     * — `Tasks.withTimeout` cannot interrupt a fiber parked on
+     * `Channel.receive`, so the probe window polls at 5ms granularity
+     * instead (the receive fiber itself still parks on the reactor; only
+     * an ACTIVE probe wait polls, and only for its window).
+     */
+    public boolean awaitAckWithin(String target, int32 timeoutMs) {
+        int64 want = target.hash();
+        int32 waited = 0;
+        while (waited < timeoutMs) {
+            Optional<int64> s = this.acks.tryReceive();
+            if (s.isPresent()) {
+                if (s.get() == want) {
+                    return true;
+                }
+                // ack for someone else — keep draining this pass
+            } else {
+                Tasks.sleepMillis(5);
+                waited = waited + 5;
+            }
+        }
+        return false;
+    }
+}

@@ -21,7 +21,12 @@ public final class Member {
 
     public Member(String name, int64 addrHi, int64 addrLo, int64 port,
                   int64 incarnation) {
-        this.name = name;
+        // Own a COPY of the name — callers pass borrowed strings whose
+        // owner (e.g. a decoded frame's field) dies with the datagram.
+        int8[] nb = name.toBytes();
+        int32 n = (int32) nb.count();
+        String owned = heap String(#nb, n);
+        this.name = #owned;
         this.addrHi = addrHi;
         this.addrLo = addrLo;
         this.port = port;

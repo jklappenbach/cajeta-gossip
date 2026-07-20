@@ -104,10 +104,14 @@ b. **Membership state machine (G2) — pure, no sockets**
 
 c. **Transport binding (G3)**
 
-   1. [ ] Over a real loopback `UdpSocket` pair, a `ping` draws an `ack` and the
-      prober marks the peer ALIVE; the receive fiber parks between datagrams. →
+   1. [x] Over a real loopback `UdpSocket` pair, a `ping` draws an `ack` and the
+      prober marks the (previously unknown) peer ALIVE from the ack's sender
+      identity; the receive fiber parks between datagrams (upstream
+      `UdpSocket.recvFromAsync`, added for this — NET-3.3's UDP half). →
       `GossipTransportTests.pingAckOverLoopback`.
-   2. [ ] An unanswered direct ping triggers `k` `ping-req`s to other peers. →
+   2. [x] An unanswered direct ping triggers `k` `ping-req`s to other live
+      peers (payload = target name) and, when the indirect window also
+      misses, the failure detector's SUSPECT verdict. →
       `GossipTransportTests.indirectProbeOnDirectTimeout`.
 
 d. **Join / leave (G4)**
@@ -156,9 +160,17 @@ b. **Membership core** · `gossip` (G2) — pure/deterministic
 
 c. **Transport + protocol loop** · `gossip` (G3)
 
-   1. [ ] Bind the core to `UdpSocket`: a protocol-period fiber + a receive
-      fiber (`recvFromAsync` → core). `GOSSIP-3`. `depends-on:` cajeta NET-1.5,
-      NET-3.3.
+   1. [x] Bind the core to `UdpSocket`: `GossipNode` — receive fiber
+      (`recvFromAsync` → decode → dispatch; poke-to-stop), SWIM probe cycle
+      (direct PING → k PING_REQs → probeFailed), ack signaling via
+      `Channel<int64>` name-hashes drained under a `Tasks.sleepMillis`
+      deadline (`Tasks.withTimeout` cannot interrupt a channel park —
+      upstream gap, noted there). `GOSSIP-3`. Upstream deps landed for
+      this: `UdpSocket.recvFromAsync` + `Tasks.sleepMillis` (both in the
+      re-cut v0.9.4). G3 scope notes in the class doc: loopback-only
+      addressing until G4; PING_REQ relay is the G5 refinement; the
+      full protocol-period fiber (recurring tick loop) arrives with the
+      Cluster API (G4/G5).
 
 d. **Join / leave / discovery** · `gossip` (G4)
 

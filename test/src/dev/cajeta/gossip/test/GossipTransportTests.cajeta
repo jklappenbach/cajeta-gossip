@@ -1,0 +1,101 @@
+package dev.cajeta.gossip.test;
+
+import dev.cajeta.gossip.GossipNode;
+import dev.cajeta.gossip.MembershipTable;
+import dev.cajeta.gossip.Member;
+import dev.cajeta.gossip.MemberState;
+import cajeta.concurrent.Tasks;
+
+// G3 — transport binding (plan §1.c): the SWIM probe cycle over real
+// loopback UdpSocket pairs. Each node runs one receive fiber
+// (recvFromAsync — parks on the reactor between datagrams); the prober
+// waits for acks through a channel under Tasks.withTimeout.
+public final class GossipTransportTests {
+
+    // Local spawn wrappers — `spawn` takes a BARE class-method call, so
+    // cross-class fiber entries route through same-class statics.
+    public static async void runNode(GossipNode n) {
+        n.receiveLoop();
+    }
+
+    public static void run(Check c) {
+        System.stdout.println("GossipTransportTests");
+        pingAckOverLoopback(c);
+        indirectProbeOnDirectTimeout(c);
+    }
+
+    // §1.c.1 — a ping draws an ack; the prober marks the (previously
+    // unknown) peer ALIVE from the ack's sender identity.
+    public static void pingAckOverLoopback(Check c) {
+        () -> int32 body = () -> {
+            GossipNode a = heap GossipNode("a", 5000);
+            GossipNode b = heap GossipNode("b", 5000);
+            // a knows b only as an address seed (no table entry yet).
+            int32 result = 0;
+            scope {
+                spawn runNode(a);
+                spawn runNode(b);
+                boolean acked = a.probe("b", b.port(), 500, 1000);
+                if (acked) {
+                    Member m = a.table().get("b");
+                    if (m != null && m.state == MemberState.ALIVE) {
+                        result = 1;
+                    } else {
+                        result = 2;      // acked but not marked ALIVE
+                    }
+                } else {
+                    result = 3;          // no ack over loopback
+                }
+                a.stop();
+                b.stop();
+            }
+            return result;
+        };
+        int32 r = Tasks.runBlocking<int32>(body);
+        c.eqInt(r, 1, "ping->ack marks peer ALIVE (code " + r + ")");
+    }
+
+    // §1.c.2 — an unanswered direct ping triggers k ping-reqs to other
+    // members; the target ends up SUSPECT after the indirect round also
+    // misses.
+    public static void indirectProbeOnDirectTimeout(Check c) {
+        () -> int32 body = () -> {
+            GossipNode a = heap GossipNode("a", 5000);
+            GossipNode b = heap GossipNode("b", 5000);
+            GossipNode x = heap GossipNode("x", 5000);
+            // "dead": a bound socket nobody services — never acks.
+            GossipNode dead = heap GossipNode("dead", 5000);
+            // a's view: b and x are alive helpers; dead is a member too.
+            a.table().applyAlive("b", 0, 2130706433, b.port(), 1);
+            a.table().applyAlive("x", 0, 2130706433, x.port(), 1);
+            a.table().applyAlive("dead", 0, 2130706433, dead.port(), 1);
+            int32 result = 0;
+            scope {
+                spawn runNode(a);
+                spawn runNode(b);
+                spawn runNode(x);
+                boolean acked = a.probe("dead", dead.port(), 150, 1000);
+                if (!acked) {
+                    result = 1;
+                } else {
+                    result = 2;          // dead socket somehow acked
+                }
+                a.stop();
+                b.stop();
+                x.stop();
+            }
+            if (result != 1) { return result; }
+            // Both helpers saw a PING_REQ naming the dead target...
+            if (b.pingReqSeen != 1) { return 10; }
+            if (x.pingReqSeen != 1) { return 11; }
+            if (!b.lastPingReqTarget.equals("dead")) { return 12; }
+            // ...and the failed round suspected the target.
+            Member m = a.table().get("dead");
+            if (m == null) { return 13; }
+            if (m.state != MemberState.SUSPECT) { return 14; }
+            return 1;
+        };
+        int32 r = Tasks.runBlocking<int32>(body);
+        c.eqInt(r, 1, "direct timeout -> k ping-reqs + SUSPECT (code " + r + ")");
+    }
+}
