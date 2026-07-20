@@ -1,0 +1,22 @@
+package dev.cajeta.gossip;
+
+/**
+ * SWIM lifecycle state of a cluster [`Member`](Member.cajeta).
+ *
+ * Transitions (driven by the failure detector + incarnation rules,
+ * see `docs/CajetaGossip.md`):
+ *
+ *   - `ALIVE`   → `SUSPECT`  a direct probe and all `k` indirect probes missed.
+ *   - `SUSPECT` → `ALIVE`    the member refuted with a higher incarnation.
+ *   - `SUSPECT` → `DEAD`     the suspicion timeout expired unrefuted.
+ *   - `ALIVE`   → `LEFT`     the member gossiped a graceful `leave`.
+ *
+ * `DEAD` and `LEFT` are terminal for that incarnation; the same node may
+ * rejoin later with a higher incarnation as a fresh `ALIVE` entry.
+ */
+public enum MemberState {
+    ALIVE,
+    SUSPECT,
+    DEAD,
+    LEFT
+}

@@ -1,0 +1,21 @@
+package dev.cajeta.gossip;
+
+/**
+ * Kind of membership change delivered on the cluster's `events()` channel.
+ *
+ * Each corresponds to an observed [`MemberState`](MemberState.cajeta)
+ * transition at the local node:
+ *
+ *   - `JOINED`    a new member entered the ALIVE view.
+ *   - `SUSPECTED` a member moved ALIVE → SUSPECT.
+ *   - `RECOVERED` a SUSPECT member refuted (higher incarnation) → ALIVE.
+ *   - `LEFT`      a member departed gracefully.
+ *   - `DEAD`      a SUSPECT member's suspicion timeout expired.
+ */
+public enum EventKind {
+    JOINED,
+    SUSPECTED,
+    RECOVERED,
+    LEFT,
+    DEAD
+}

@@ -12,12 +12,15 @@ protocol* (probe cadence, suspicion policy, dissemination strategy), not a
 universal primitive — the near-universal precedent is to ship it as a library
 (Go `serf`/`memberlist`, Java JGroups/Akka Cluster, Rust crates), and being a
 library lets the protocol evolve at its own pace. It builds **on** the
-`cajeta.net` stdlib transport (`UdpSocket`, plus multicast for discovery) the
+`cajeta.io.net` stdlib transport (`UdpSocket`, plus multicast for discovery) the
 same way Toffee builds on the GPU stack.
 
-- **Package:** `gossip.*`
-- **Status:** designed, not implemented. Build plan: [`../plans/cajeta-gossip-plan.md`](../plans/cajeta-gossip-plan.md).
-- **Upstream transport:** the `cajeta.net` stdlib in the [cajeta repo](https://github.com/jklappenbach/cajeta) (`docs/Net.md` — `UdpSocket`/NET-1.5, multicast/NET-14).
+- **Package:** `dev.cajeta.gossip` (reverse-DNS, per the `dev.cajeta.http` ecosystem convention)
+- **Status:** designed; Phase 0 (library build) done — the repo builds as
+  `dev.cajeta.gossip` 0.1.0 (`.cja`) with seed types (`MemberState`,
+  `EventKind`); the protocol (G1–G6) is not yet implemented. Build plan:
+  [`../plans/cajeta-gossip-plan.md`](../plans/cajeta-gossip-plan.md).
+- **Upstream transport:** the `cajeta.io.net` stdlib in the [cajeta repo](https://github.com/jklappenbach/cajeta) (`docs/Net.md` — `UdpSocket`/NET-1.5, multicast/NET-14).
 
 ## What it is (and is not)
 
@@ -60,16 +63,16 @@ separate broadcast — each riding along until sent roughly `λ·log(N)` times. 
 graceful `leave` is gossiped so peers mark the node gone immediately.
 
 **Join** contacts one or more **seeds** (a static unicast list, or a multicast
-discovery group via `cajeta.net` multicast), pulls a full membership snapshot,
+discovery group via `cajeta.io.net` multicast), pulls a full membership snapshot,
 then settles into normal gossip.
 
 ## Surface
 
 ```cajeta
-package gossip;
+package dev.cajeta.gossip;
 
-import cajeta.net.SocketAddress;
-import cajeta.net.IpAddress;
+import cajeta.io.net.SocketAddress;
+import cajeta.io.net.IpAddress;
 import cajeta.lang.stream.Channel;
 import cajeta.time.Duration;
 
@@ -122,7 +125,7 @@ changes and inbound payloads without polling.
 
 ## Wire format
 
-A compact binary message defined as a `view` (the `cajeta.net`/stdlib view +
+A compact binary message defined as a `view` (the `cajeta.io.net`/stdlib view +
 codec layer) so encoding/decoding is zero-copy and endianness-pinned:
 
 - **Header** — magic + version, message type (`PING` / `ACK` / `PING_REQ` /
@@ -141,7 +144,7 @@ codec layer) so encoding/decoding is zero-copy and endianness-pinned:
   state machine; it parks on the reactor between datagrams (no busy-spin).
 - The membership table + SWIM state machine is a **pure, deterministic** core
   (clock + transport injected) so it is unit-testable without sockets.
-- Probes are **unicast**; `cajeta.net` multicast is used only for the optional
+- Probes are **unicast**; `cajeta.io.net` multicast is used only for the optional
   discovery group, so a node can find seeds without a static list.
 
 ## Deferred / non-goals
@@ -155,6 +158,6 @@ codec layer) so encoding/decoding is zero-copy and endianness-pinned:
 
 ## Upstream dependencies (in the cajeta repo)
 
-- `UdpSocket` send/recv + `recvFromAsync` — `cajeta.net` (NET-1.5 / NET-3.3).
-- UDP multicast for optional seed discovery — `cajeta.net` (NET-14).
+- `UdpSocket` send/recv + `recvFromAsync` — `cajeta.io.net` (NET-1.5 / NET-3.3).
+- UDP multicast for optional seed discovery — `cajeta.io.net` (NET-14).
 - `Channel<T>`, the fiber timer, and the `view`/codec layer — `cajeta` stdlib.

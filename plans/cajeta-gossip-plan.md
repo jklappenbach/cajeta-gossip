@@ -1,7 +1,8 @@
 # Plan: `cajeta-gossip` — SWIM cluster membership (external library)
 
-Status: **Planned, blocked on Phase 0.** Spec: [`../docs/CajetaGossip.md`](../docs/CajetaGossip.md).
-External sibling library (package `gossip.*`) built on the `cajeta.net` stdlib
+Status: **Phase 0 cleared (cajeta 0.9.2); G1/G2 unblocked.** Spec: [`../docs/CajetaGossip.md`](../docs/CajetaGossip.md).
+External sibling library (package `dev.cajeta.gossip`, following the
+`dev.cajeta.http` ecosystem naming) built on the `cajeta.io.net` stdlib
 transport — *not* part of stdlib.
 
 Ids are `GOSSIP-N`; `- [ ]` todo, `- [x]` shipped, `- [~]` deferred / blocked
@@ -15,12 +16,14 @@ falls back to `k` indirect probes (`ping-req`), then suspects → declares dead,
 with incarnation numbers refuting false suspicion; membership deltas spread
 infection-style (piggybacked on ping/ack). See the spec for the model.
 
-**Upstream dependencies (in the [cajeta repo](https://github.com/jklappenbach/cajeta), must exist first):**
-- A **library build kind** in the Cajeta build tool — see Phase 0.
-- `UdpSocket` send/recv executing end-to-end — `cajeta.net` NET-1.5 (gated on the
-  NET-1.3 receiver-lowering keystone).
-- Async datagram I/O — NET-3.3 (`recvFromAsync`/`sendToAsync`).
-- (Optional) multicast seed discovery — NET-14.
+**Upstream dependencies (in the [cajeta repo](https://github.com/jklappenbach/cajeta)) — status as of cajeta 0.9.2:**
+- A **library build kind** in the Cajeta build tool — **shipped** (Phase 0 cleared).
+- `UdpSocket` send/recv executing end-to-end — `cajeta.io.net` NET-1.5:
+  **works** (sync surface; the receiver-lowering keystone landed 2026-06).
+- Async datagram I/O — NET-3.3 (`recvFromAsync`/`sendToAsync`): **not on the
+  `UdpSocket` surface yet** (TCP async + `Reactor.awaitReadable/awaitWritable`
+  exist — interim: non-blocking `recvFrom` + reactor park).
+- (Optional) multicast seed discovery — NET-14: **not started**.
 - `Channel<T>`, the fiber timer, and the `view`/codec layer — present.
 
 ## Scope
@@ -34,34 +37,40 @@ infection-style (piggybacked on ping/ack). See the spec for the model.
 
 ---
 
-## Phase 0 — Cajeta library build (PREREQUISITE, blocked upstream)
+## Phase 0 — Cajeta library build (CLEARED — cajeta 0.9.2, 2026-07-19)
 
-**This is the first element and currently a blocker.** The Cajeta build tool
-builds *executables* (a `settings.build.binaries` entry with an `entryMethod`);
-there is **no library build kind** — a target with no entry point that produces
-a reusable, dependable package artifact. `cajeta-gossip` cannot build or publish
-as a dependency until that exists.
+**Cleared.** cajeta 0.9.2 (system-wide, `f8c601b3`) ships the library project
+kind and archetype (upstream `agents/cajeta/library-archetype-plan.md`, spec
+`docs/specification/buildtool/LibraryProjectType.md`): a manifest with no
+`settings.build.entry-method` builds to `build/archive/<name>-<version>.cja`.
+The ecosystem precedent is `dev.cajeta.http` 0.1.1 (first external lib on
+Olla), whose reverse-DNS naming this repo now follows: **`dev.cajeta.gossip`**.
 
-- [~] **GOSSIP-0.1** A **library** project kind in `cajeta build-tool` — a
-      manifest/target that produces a consumable library artifact (no entry
-      method), resolvable as a dependency by other Cajeta projects.
-      *BLOCKED → owned upstream (build-tool + manifest schema).*
-- [~] **GOSSIP-0.2** A **library `cajeta init` archetype/template** (the
-      `cajeta init library` form) that scaffolds this shape.
-      *BLOCKED → owned upstream (init templates).*
-- [ ] **GOSSIP-0.3** Once 0.1/0.2 land, add this repo's library manifest +
-      build config and confirm `cajeta build` produces the library artifact and
-      that a sample consumer can depend on it.
+- [x] **GOSSIP-0.1** A **library** project kind in `cajeta build-tool`.
+      *Shipped upstream in 0.9.2.*
+- [x] **GOSSIP-0.2** A **library `cajeta init` archetype/template**.
+      *Shipped upstream in 0.9.2 (`cajeta init --list` → `library`).*
+- [x] **GOSSIP-0.3** This repo's library manifest + build config
+      (`cajeta.json`, `dev.cajeta.gossip` 0.1.0, seed sources
+      `MemberState`/`EventKind`); `cajeta build` emits the `.cja` and a
+      throwaway consumer resolves + links it. Pinned by `test/phase0.sh`.
 
-> Until GOSSIP-0.1/0.2 ship, this repo carries only the spec (`docs/`) and this
-> plan (`plans/`) — no build config. The maintainer is adding the library build
-> to `cajeta build-tool` and the templates; this plan tracks it as the gate.
+> Local-consumer note (0.9.2 resolver): a *direct* dependency resolves only
+> from repositories — `{ "path": ... }` in `settings.overrides` applies to
+> transitive deps only, and the path *dependency-source* form is Phase 6c
+> (unlanded). `test/phase0.sh` therefore stages the built `.cja` into a
+> `type: "filesystem"` repository layout
+> (`<root>/<name>/<version>/<name>-<version>.cja` + sidecar `cajeta.json`).
 
 ### Acceptance
 
-- [ ] `cajeta init library` scaffolds a buildable library project.
-- [ ] `cajeta build` in this repo emits a library artifact (no entry method).
-- [ ] A throwaway consumer project resolves + links `cajeta-gossip` as a dep.
+- [x] `cajeta init library` scaffolds a buildable library project.
+      *(Verified upstream + against the scaffold; this repo's manifest derives
+      from it.)*
+- [x] `cajeta build` in this repo emits a library artifact (no entry method).
+      → `test/phase0.sh`
+- [x] A throwaway consumer project resolves + links `cajeta-gossip` as a dep.
+      → `test/phase0.sh` (filesystem-repo staging)
 
 ---
 
@@ -155,8 +164,8 @@ f. **Spec** — [x] `docs/CajetaGossip.md` (present).
 
 ## 3. Acceptance Criteria
 
-a. [ ] **Phase 0 cleared:** the library build kind exists and this repo builds +
-   publishes as a Cajeta library dependency.
+a. [x] **Phase 0 cleared:** the library build kind exists and this repo builds +
+   publishes as a Cajeta library dependency. → `test/phase0.sh`
 b. [ ] The pure membership core passes its state-machine suite (§1.b) with no
    sockets.
 c. [ ] Over real loopback UDP, ping/ack + indirect probe + join/leave behave per
@@ -168,7 +177,7 @@ d. [ ] An N-node cluster converges and detects a killed node without false
 
 ## Phasing
 
-0. [~] **Phase 0 — library build** (blocked upstream; the gate for everything).
+0. [x] **Phase 0 — library build** (cleared by cajeta 0.9.2; `test/phase0.sh`).
 1. [ ] **G1 wire** → **G2 core** (socket-free; can be written/tested as soon as
    the library build exists, before the net keystone lands).
 2. [ ] **G3 transport** + **G4 join/leave** — gated on cajeta **NET-1.5**
