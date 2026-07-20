@@ -1,0 +1,163 @@
+package dev.cajeta.gossip;
+
+import cajeta.collection.HashMap;
+import cajeta.collection.ArrayList;
+
+/**
+ * The pure SWIM membership core (spec § Runtime integration): every state
+ * transition of the local view lives here, with **no sockets and no
+ * clock** — callers pass explicit `now` millis, so the machine is fully
+ * deterministic and unit-testable (plan G2).
+ *
+ * Incarnation rules (the SWIM refutation protocol):
+ *
+ * | update        | applies over                                        |
+ * |---------------|-----------------------------------------------------|
+ * | alive(inc)    | any state with STRICTLY greater `inc`               |
+ * | suspect(inc)  | ALIVE at `inc >=` current; SUSPECT at `inc >` only  |
+ * | dead(inc)     | ALIVE / SUSPECT at `inc >=` current                 |
+ * | left          | any live state (graceful departure is authoritative)|
+ *
+ * Suspicion winning the ALIVE tie is what forces a suspected-but-healthy
+ * node to refute with a bumped incarnation — the anti-flap mechanism.
+ * Everything else is stale and ignored (returns `false`).
+ */
+public final class MembershipTable {
+    public HashMap<String, Member> members;
+    /** Insertion-ordered member names — the deterministic iteration order
+     *  for [`tick`](#tick) (and, later, round-robin probe selection). */
+    public ArrayList<String> names;
+    /** SUSPECT → DEAD promotion delay, millis. */
+    public int64 suspectTimeoutMillis;
+
+    public MembershipTable(int64 suspectTimeoutMillis) {
+        this.members = heap HashMap<String, Member>(16);
+        this.names = heap ArrayList<String>();
+        this.suspectTimeoutMillis = suspectTimeoutMillis;
+    }
+
+    /** The current belief about `name`, or null if unknown. */
+    public Member get(String name) {
+        return this.members.get(name);
+    }
+
+    /**
+     * Apply an `alive` observation (join, refutation, or gossip delta).
+     * Inserts unknown members as ALIVE; otherwise applies only with a
+     * strictly greater incarnation. Returns whether it applied.
+     */
+    public boolean applyAlive(String name, int64 addrHi, int64 addrLo,
+                              int64 port, int64 incarnation) {
+        if (!this.members.containsKey(name)) {
+            Member fresh = heap Member(name, addrHi, addrLo, port, incarnation);
+            this.members.put(name, fresh);
+            this.names.add(name);
+            return true;
+        }
+        Member m = this.members.get(name);
+        if (incarnation <= m.incarnation) {
+            return false;
+        }
+        m.state = MemberState.ALIVE;
+        m.incarnation = incarnation;
+        m.addrHi = addrHi;
+        m.addrLo = addrLo;
+        m.port = port;
+        m.suspectSince = 0;
+        return true;
+    }
+
+    /**
+     * Apply a `suspect` observation (gossip delta, or the local failure
+     * detector via [`probeFailed`](#probeFailed)). Ties beat ALIVE;
+     * refreshing an existing SUSPECT needs a strictly greater incarnation.
+     * Returns whether it applied.
+     */
+    public boolean applySuspect(String name, int64 incarnation, int64 now) {
+        if (!this.members.containsKey(name)) {
+            return false;
+        }
+        Member m = this.members.get(name);
+        if (m.state == MemberState.ALIVE) {
+            if (incarnation < m.incarnation) {
+                return false;
+            }
+        } else if (m.state == MemberState.SUSPECT) {
+            if (incarnation <= m.incarnation) {
+                return false;
+            }
+        } else {
+            return false;                     // DEAD / LEFT are terminal
+        }
+        m.state = MemberState.SUSPECT;
+        m.incarnation = incarnation;
+        m.suspectSince = now;
+        return true;
+    }
+
+    /**
+     * Apply a `dead` observation (gossip delta). Equal-or-greater
+     * incarnation kills a live entry. Returns whether it applied.
+     */
+    public boolean applyDead(String name, int64 incarnation) {
+        if (!this.members.containsKey(name)) {
+            return false;
+        }
+        Member m = this.members.get(name);
+        if (m.state == MemberState.DEAD || m.state == MemberState.LEFT) {
+            return false;
+        }
+        if (incarnation < m.incarnation) {
+            return false;
+        }
+        m.state = MemberState.DEAD;
+        m.incarnation = incarnation;
+        return true;
+    }
+
+    /** Apply a graceful `leave` — authoritative over any live state. */
+    public boolean applyLeft(String name) {
+        if (!this.members.containsKey(name)) {
+            return false;
+        }
+        Member m = this.members.get(name);
+        if (m.state == MemberState.DEAD || m.state == MemberState.LEFT) {
+            return false;
+        }
+        m.state = MemberState.LEFT;
+        return true;
+    }
+
+    /**
+     * The local failure detector's verdict: direct probe + all `k`
+     * indirect probes missed. Suspects the member at its CURRENT
+     * incarnation (self-observed suspicion, per SWIM).
+     */
+    public void probeFailed(String name, int64 now) {
+        if (!this.members.containsKey(name)) {
+            return;
+        }
+        Member m = this.members.get(name);
+        this.applySuspect(name, m.incarnation, now);
+    }
+
+    /**
+     * Advance suspicion timeouts: every SUSPECT whose window expired
+     * (`now - suspectSince >= suspectTimeoutMillis`) is promoted to DEAD.
+     * Returns how many were promoted.
+     */
+    public int32 tick(int64 now) {
+        int32 promoted = 0;
+        int32 i = 0;
+        while (i < this.names.count()) {
+            Member m = this.members.get(this.names.get(i));
+            if (m.state == MemberState.SUSPECT
+                    && now - m.suspectSince >= this.suspectTimeoutMillis) {
+                m.state = MemberState.DEAD;
+                promoted = promoted + 1;
+            }
+            i = i + 1;
+        }
+        return promoted;
+    }
+}

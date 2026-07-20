@@ -91,13 +91,16 @@ a. **Wire format (G1)**
 
 b. **Membership state machine (G2) — pure, no sockets**
 
-   1. [ ] A missed direct + indirect probe moves ALIVE→SUSPECT, and the
-      suspicion timeout moves SUSPECT→DEAD (injected clock). →
+   1. [x] A missed direct + indirect probe moves ALIVE→SUSPECT, and the
+      suspicion timeout moves SUSPECT→DEAD (injected clock — explicit `now`
+      params, no clock object). →
       `GossipMembershipTests.suspectThenDeadOnTimeout`.
-   2. [ ] An `alive` with a higher incarnation refutes a SUSPECT. →
+   2. [x] An `alive` with a higher incarnation refutes a SUSPECT. →
       `GossipMembershipTests.higherIncarnationRefutesSuspect`.
-   3. [ ] A stale (lower/equal-incarnation) update is ignored. →
-      `GossipMembershipTests.staleUpdateIgnored`.
+   3. [x] A stale (lower/equal-incarnation) update is ignored — full SWIM
+      tie rules pinned: suspect beats ALIVE at equal inc (the anti-flap
+      refutation forcer); suspect-over-suspect and alive-over-anything need
+      strictly greater. → `GossipMembershipTests.staleUpdateIgnored`.
 
 c. **Transport binding (G3)**
 
@@ -145,9 +148,11 @@ a. **Wire format** · `gossip` (G1)
 
 b. **Membership core** · `gossip` (G2) — pure/deterministic
 
-   1. [ ] `MembershipTable` + the SWIM state machine (ALIVE/SUSPECT/DEAD/LEFT,
-      incarnation rules, random peer selection) with injected clock + transport.
-      `GOSSIP-2`.
+   1. [x] `MembershipTable` + the SWIM state machine (ALIVE/SUSPECT/DEAD/LEFT,
+      incarnation rules) with explicit-`now` injection; insertion-ordered
+      name list ready for round-robin/random probe selection (G3 wires the
+      selector + transport). `GOSSIP-2` — `Member`, `MembershipTable`
+      (applyAlive/applySuspect/applyDead/applyLeft/probeFailed/tick).
 
 c. **Transport + protocol loop** · `gossip` (G3)
 
@@ -186,8 +191,8 @@ d. [ ] An N-node cluster converges and detects a killed node without false
 ## Phasing
 
 0. [x] **Phase 0 — library build** (cleared by cajeta 0.9.2; `test/phase0.sh`).
-1. [ ] **G1 wire** → **G2 core** (socket-free; can be written/tested as soon as
-   the library build exists, before the net keystone lands).
+1. [x] **G1 wire** → **G2 core** (socket-free) — done 2026-07-20, 122 checks
+   green (`cajeta test`).
 2. [ ] **G3 transport** + **G4 join/leave** — gated on cajeta **NET-1.5**
    executing.
 3. [ ] **G5 dissemination** + **G6 cluster tests** — the full epidemic + the

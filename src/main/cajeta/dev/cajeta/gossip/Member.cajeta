@@ -1,0 +1,32 @@
+package dev.cajeta.gossip;
+
+/**
+ * One entry in the [`MembershipTable`](MembershipTable.cajeta): the local
+ * node's current belief about a peer. Address fields mirror the wire
+ * format ([`Delta`](Delta.cajeta)): 16 bytes as two big-endian words, IPv4
+ * carried v4-mapped. The `SocketAddress`-typed public surface arrives with
+ * the cluster API (G4); the pure core stays primitive so it is
+ * deterministic and socket-free.
+ */
+public final class Member {
+    public String      name;
+    public int64       addrHi;
+    public int64       addrLo;
+    public int64       port;
+    public MemberState state;
+    public int64       incarnation;
+    /** Millis timestamp when this member entered SUSPECT; meaningful only
+     *  while `state == SUSPECT`. */
+    public int64       suspectSince;
+
+    public Member(String name, int64 addrHi, int64 addrLo, int64 port,
+                  int64 incarnation) {
+        this.name = name;
+        this.addrHi = addrHi;
+        this.addrLo = addrLo;
+        this.port = port;
+        this.state = MemberState.ALIVE;
+        this.incarnation = incarnation;
+        this.suspectSince = 0;
+    }
+}

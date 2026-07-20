@@ -1,0 +1,83 @@
+package dev.cajeta.gossip.test;
+
+import dev.cajeta.gossip.MembershipTable;
+import dev.cajeta.gossip.Member;
+import dev.cajeta.gossip.MemberState;
+
+// G2 — pure membership state machine (plan §1.b). No sockets, no real
+// clock: every method takes explicit `now` millis, so the suite is fully
+// deterministic.
+//
+// SWIM incarnation rules pinned here:
+//   - alive(inc)   overrides anything with STRICTLY greater inc.
+//   - suspect(inc) overrides ALIVE at equal-or-greater inc (suspicion wins
+//     ties — that's what forces the suspected node to refute with a bump),
+//     and SUSPECT only at strictly greater inc.
+//   - everything else is stale and ignored.
+public final class GossipMembershipTests {
+
+    public static void run(Check c) {
+        System.stdout.println("GossipMembershipTests");
+        suspectThenDeadOnTimeout(c);
+        higherIncarnationRefutesSuspect(c);
+        staleUpdateIgnored(c);
+    }
+
+    // §1.b.1 — missed probes suspect; the suspicion timeout kills.
+    public static void suspectThenDeadOnTimeout(Check c) {
+        MembershipTable t = heap MembershipTable(5000);
+        t.applyAlive("b", 0, 1, 7947, 1);
+        Member m = t.get("b");
+        c.that(m.state == MemberState.ALIVE, "starts ALIVE");
+
+        t.probeFailed("b", 1000);
+        c.that(m.state == MemberState.SUSPECT, "probe miss -> SUSPECT");
+
+        int32 promoted = t.tick(5999);
+        c.eqInt(promoted, 0, "no promotion before timeout");
+        c.that(m.state == MemberState.SUSPECT, "still SUSPECT at 5999");
+
+        promoted = t.tick(6000);
+        c.eqInt(promoted, 1, "one promotion at timeout");
+        c.that(m.state == MemberState.DEAD, "SUSPECT -> DEAD at timeout");
+    }
+
+    // §1.b.2 — a higher-incarnation alive refutes suspicion.
+    public static void higherIncarnationRefutesSuspect(Check c) {
+        MembershipTable t = heap MembershipTable(5000);
+        t.applyAlive("b", 0, 1, 7947, 1);
+        t.probeFailed("b", 1000);
+        Member m = t.get("b");
+        c.that(m.state == MemberState.SUSPECT, "suspected");
+
+        c.that(t.applyAlive("b", 0, 1, 7947, 2), "refutation applies");
+        c.that(m.state == MemberState.ALIVE, "refuted -> ALIVE");
+        c.eqInt(m.incarnation, 2, "incarnation bumped");
+
+        int32 promoted = t.tick(60000);
+        c.eqInt(promoted, 0, "no dead promotion after refutation");
+        c.that(m.state == MemberState.ALIVE, "stays ALIVE");
+    }
+
+    // §1.b.3 — stale updates (lower / non-overriding equal inc) are ignored.
+    public static void staleUpdateIgnored(Check c) {
+        MembershipTable t = heap MembershipTable(5000);
+        t.applyAlive("b", 0, 1, 7947, 5);
+        Member m = t.get("b");
+
+        c.that(!t.applyAlive("b", 0, 1, 7947, 5), "equal-inc alive is stale");
+        c.that(!t.applyAlive("b", 0, 1, 7947, 4), "lower-inc alive is stale");
+        c.that(m.state == MemberState.ALIVE, "still ALIVE");
+        c.eqInt(m.incarnation, 5, "incarnation unchanged");
+
+        c.that(!t.applySuspect("b", 4, 2000), "lower-inc suspect is stale");
+        c.that(m.state == MemberState.ALIVE, "still ALIVE after stale suspect");
+
+        c.that(t.applySuspect("b", 5, 2000), "equal-inc suspect wins the tie");
+        c.that(m.state == MemberState.SUSPECT, "tied suspect applies");
+
+        c.that(!t.applySuspect("b", 5, 3000), "suspect-over-suspect needs greater inc");
+        c.that(t.applySuspect("b", 6, 3000), "greater-inc suspect refreshes");
+        c.eqInt(m.incarnation, 6, "suspect refresh bumps incarnation");
+    }
+}
