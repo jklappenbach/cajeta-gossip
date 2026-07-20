@@ -78,11 +78,17 @@ Olla), whose reverse-DNS naming this repo now follows: **`dev.cajeta.gossip`**.
 
 a. **Wire format (G1)**
 
-   1. [ ] Golden encode/decode round-trip for each message type (`PING`/`ACK`/
+   1. [~] Golden encode/decode round-trip for each message type (`PING`/`ACK`/
       `PING_REQ`/`SYNC`/`LEAVE`/`USER`) incl. a piggyback delta list. →
       `GossipWireTests.roundTripAllMessageTypes`.
-   2. [ ] Oversized payload / delta list is rejected (stays inside the MTU cap). →
-      `GossipWireTests.rejectsOverMtu`.
+      *BLOCKED → upstream view v1.1: the piggyback list needs arrays of
+      var-size elements (`Delta[]` with a `String` name per delta) —
+      `docs/specification/lang/Views.md` defers this to v1.1; 0.9.2 views
+      support fixed fields + `String` + primitive `T[]` only. Decision
+      2026-07-19: grow the compiler rather than bend the wire format
+      (fixed-K slots / manual codec rejected).*
+   2. [~] Oversized payload / delta list is rejected (stays inside the MTU cap). →
+      `GossipWireTests.rejectsOverMtu`. *BLOCKED → same view v1.1 gate.*
 
 b. **Membership state machine (G2) — pure, no sockets**
 
@@ -132,8 +138,9 @@ f. **Cluster convergence / failure (G6)**
 
 a. **Wire format** · `gossip` (G1)
 
-   1. [ ] `view`-based message codec: header + bounded membership-delta list +
-      optional user payload. `GOSSIP-1`.
+   1. [~] `view`-based message codec: header + bounded membership-delta list +
+      optional user payload. `GOSSIP-1`. *BLOCKED → upstream view v1.1
+      (var-size element arrays); see §1.a.*
 
 b. **Membership core** · `gossip` (G2) — pure/deterministic
 
