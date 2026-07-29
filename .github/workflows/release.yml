@@ -17,11 +17,12 @@ jobs:
   release:
     uses: jklappenbach/cajeta/.github/workflows/lib-release.yml@main
     with:
-      # v0.9.4 was the FLOOR (view element arrays for the wire format's Delta[]
-      # piggyback list, the cross-file view forward-reference fix,
-      # UdpSocket.recvFromAsync, Tasks.sleepMillis); the pin now tracks the
-      # ecosystem-current toolchain. Suite verified 130/130 on v0.10.1.
-      cajeta-version: v0.10.1
+      # FLOOR IS v0.11.0 — a correctness requirement, not a preference: G4b's
+      # multicast discovery uses the NET-14 UdpSocket surface (joinGroupOn,
+      # setMulticastInterface, ...), which first shipped in v0.11.0. Earlier
+      # floors for the record: v0.9.4 (view element arrays, recvFromAsync).
+      # Suite verified 133/133 on v0.11.0, both carrier modes.
+      cajeta-version: v0.11.0
       # The manifest's `test` task is self-contained (compiles test/src against
       # the built .cja, no external deps), so CI runs it directly.
       test-command: cajeta test
