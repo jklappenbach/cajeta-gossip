@@ -62,6 +62,17 @@ public final class GossipNode {
     public int32 pingReqSeen;
     public String lastPingReqTarget;
 
+    // G4b — multicast discovery (NET-14). A node that calls enableDiscovery
+    // becomes a DISCOVERABLE SEED: `disco` is a second socket bound to the
+    // well-known discovery port and joined to the group, whose fiber answers
+    // multicast SYNC requests with the same snapshot the unicast join path
+    // serves. Null on nodes that never enable it. Its own writer, because the
+    // discovery fiber runs concurrently with the receive fiber and WireWriter
+    // is not shareable across fibers (see rxWriter's note).
+    public UdpSocket disco;
+    public WireWriter discoWriter;
+    public int32 discoPort;
+
     public GossipNode(String name, int64 suspectTimeoutMillis) {
         this.name = name;
         this.incarnation = 1;
@@ -82,6 +93,9 @@ public final class GossipNode {
         this.indirectK = 3;
         this.pingReqSeen = 0;
         this.lastPingReqTarget = "";
+        this.disco = null;
+        this.discoWriter = heap WireWriter();
+        this.discoPort = 0;
     }
 
     public int32 port() { return this.boundPort; }
@@ -122,6 +136,12 @@ public final class GossipNode {
         IpAddress lo = IpAddress.loopbackV4();
         SocketAddress self = SocketAddress.of(#lo, this.boundPort);
         this.sock.sendTo(poke, 0, 1, self);
+        if (this.disco != null) {
+            // Same trick for the discovery fiber parked on its own socket.
+            IpAddress lo2 = IpAddress.loopbackV4();
+            SocketAddress d = SocketAddress.of(#lo2, this.discoPort);
+            this.sock.sendTo(poke, 0, 1, d);
+        }
     }
 
     /** Decode one frame and dispatch by message type. */
@@ -242,20 +262,132 @@ public final class GossipNode {
      *  join-time sync is bounded by design; anti-entropy beyond it is out
      *  of scope for v1). Empty payload = response (never re-replied). */
     public void sendSnapshot(SocketAddress dest) {
-        this.rxWriter.begin(Wire.SYNC, this.name, this.incarnation);
-        this.rxWriter.addDelta((int8) MemberState.ALIVE, this.incarnation,
-                               0, 2130706433, (int64) this.boundPort, this.name);
+        this.sendSnapshotVia(this.rxWriter, dest);
+    }
+
+    /** The snapshot body, parameterized on the writer so the receive fiber
+     *  (rxWriter) and the discovery fiber (discoWriter) never share one. */
+    public void sendSnapshotVia(WireWriter w, SocketAddress dest) {
+        w.begin(Wire.SYNC, this.name, this.incarnation);
+        w.addDelta((int8) MemberState.ALIVE, this.incarnation,
+                   0, 2130706433, (int64) this.boundPort, this.name);
         int32 i = 0;
         while (i < this.membership.names.count()) {
             Member m = this.membership.get(this.membership.names.get(i));
             if (m.state == MemberState.ALIVE) {
-                this.rxWriter.addDelta((int8) MemberState.ALIVE, m.incarnation,
-                                       m.addrHi, m.addrLo, m.port, m.name);
+                w.addDelta((int8) MemberState.ALIVE, m.incarnation,
+                           m.addrHi, m.addrLo, m.port, m.name);
             }
             i = i + 1;
         }
-        int8[] frame = this.rxWriter.finish();
+        int8[] frame = w.finish();
         this.sock.sendTo(frame, 0, (int32) frame.count(), dest);
+    }
+
+    // -- G4b: multicast discovery (needs cajeta >= NET-14) -------------------
+
+    /**
+     * Become a discoverable seed: bind a second socket on
+     * `0.0.0.0:discoveryPort`, join `group` via the interface addressed
+     * `ifaceV4` (loopback in the tests), and remember the port for
+     * [`stop`](#stop)'s wake poke. Run the answering fiber with
+     * `spawn runDiscoveryLoop(node)`.
+     *
+     * One discoverable seed per host port: this bind is deliberately
+     * plain (no address reuse), so a second same-host seed on the same
+     * discovery port fails loudly at bind rather than silently splitting
+     * the group's requests between processes.
+     */
+    public void enableDiscovery(IpAddress group, int32 discoveryPort,
+                                IpAddress ifaceV4) {
+        IpAddress any = IpAddress.anyV4();
+        SocketAddress a = SocketAddress.of(#any, discoveryPort);
+        this.disco = UdpSocket.bind(a);
+        this.disco.joinGroupOn(group, ifaceV4);
+        this.discoPort = discoveryPort;
+    }
+
+    /** `spawn` trampoline for the discovery fiber. */
+    public static async void runDiscoveryLoop(GossipNode n) {
+        n.discoveryLoop();
+    }
+
+    /** The discovery fiber's body: answer multicast SYNC REQUESTS (non-empty
+     *  payload marker) with a snapshot, unicast back to the requester. Replies
+     *  flow from the MAIN socket, so the requester's table learns members from
+     *  the payload deltas — the reply's source address is irrelevant. Nothing
+     *  else is handled here; the discovery socket is not a gossip endpoint. */
+    public void discoveryLoop() {
+        int8[] buf = heap int8[1500];
+        while (this.running) {
+            RecvResult r = this.disco.recvFromAsync(buf, 0, 1500);
+            if (!this.running) {
+                return;
+            }
+            try {
+                this.handleDiscoveryFrame(buf, r.getFrom());
+            } catch (Exception e) {
+                // malformed datagram — drop (best-effort protocol)
+            }
+        }
+    }
+
+    /** Decode one discovery datagram; reply to SYNC requests only. The
+     *  requester's own delta is deliberately NOT applied here — the discovery
+     *  fiber never mutates the membership table (that stays the receive
+     *  fiber's job); the joiner introduces itself through normal ping traffic
+     *  once it has the snapshot. */
+    public void handleDiscoveryFrame(int8[] buf, SocketAddress from) {
+        GossipMessage m = GossipMessage(buf);
+        if (m.magic != Wire.MAGIC) {
+            return;
+        }
+        if (m.msgType != Wire.SYNC) {
+            return;
+        }
+        int8[] marker = m.payload;
+        if ((int32) marker.count() == 0) {
+            return;
+        }
+        this.sendSnapshotVia(this.discoWriter, from);
+    }
+
+    /**
+     * Join via the multicast discovery group (G4b): pin this socket's
+     * outbound multicast interface to `ifaceV4` (loopback in the tests, so
+     * nothing leaves the host), multicast the same SYNC REQUEST the unicast
+     * [`join`](#join) sends, and wait for any listening seed's snapshot to
+     * land — success = the table grew. Complements, not replaces, unicast
+     * seeds: `join` remains the path when seed addresses are known.
+     */
+    public boolean joinViaDiscovery(IpAddress group, int32 discoveryPort,
+                                    IpAddress ifaceV4, int32 timeoutMs) {
+        int32 before = this.membership.names.count();
+        this.sock.setMulticastInterface(ifaceV4);
+        this.sock.setMulticastLoopback(true);
+
+        int8[] go = group.getOctets();
+        IpAddress g = IpAddress.fromOctets(go, group.isV4() ? 4 : 16);
+        SocketAddress dest = SocketAddress.of(#g, discoveryPort);
+
+        this.writer.begin(Wire.SYNC, this.name, this.incarnation);
+        this.writer.addDelta((int8) MemberState.ALIVE, this.incarnation,
+                             0, 2130706433, (int64) this.boundPort, this.name);
+        int8[] req = heap int8[1];
+        req[0] = (int8) 1;
+        this.writer.setPayload(req);
+        int8[] frame = this.writer.finish();
+        this.sock.sendTo(frame, 0, (int32) frame.count(), dest);
+
+        int32 waited = 0;
+        while (waited < timeoutMs) {
+            if (this.membership.names.count() > before) {
+                return true;
+            }
+            Tasks.sleepMillis(5);
+            waited = waited + 5;
+        }
+        return false;
     }
 
     /**

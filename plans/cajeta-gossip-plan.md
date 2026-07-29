@@ -4,8 +4,8 @@ Status: **v1 core COMPLETE (2026-07-20)** — Phase 0 + G1–G6 all green
 (130 checks, both carrier modes). Open: the `Cluster`/`GossipConfig`
 public facade, PING_REQ relay, random probe selection, epidemic USER
 relay, piggyback compaction, owning-channel `events()`/`messages()`
-(all registered inline below); GOSSIP-4b multicast on NET-14; security
-+ Lifeguard post-v1. Toolchain: cajeta ≥ 0.9.4 (re-cut — element
+(all registered inline below); security + Lifeguard post-v1. GOSSIP-4b
+multicast discovery landed 2026-07-29 (cajeta NET-14). Toolchain: cajeta ≥ 0.9.4 (re-cut — element
 arrays + view forward-reference fix + `recvFromAsync` + `sleepMillis`). Spec: [`../docs/CajetaGossip.md`](../docs/CajetaGossip.md).
 External sibling library (package `dev.cajeta.gossip`, following the
 `dev.cajeta.http` ecosystem naming) built on the `cajeta.io.net` stdlib
@@ -129,8 +129,12 @@ d. **Join / leave (G4)**
    2. [x] `leave()` gossips a graceful departure; peers mark it LEFT
       (authoritative — no suspicion round). →
       `GossipJoinLeaveTests.gracefulLeave`.
-   3. [~] Join via multicast discovery group. *DEFERRED → needs NET-14.* →
-      `GossipJoinLeaveTests.joinViaMulticastDiscovery`.
+   3. [x] Join via multicast discovery group. *Un-deferred 2026-07-29 —
+      cajeta NET-14 shipped.* → `GossipDiscoveryTests` (own suite, not the
+      originally-sketched JoinLeave test name): seed answers a multicast SYNC
+      request with the snapshot; no-seed times out clean; the seed keeps
+      serving repeat joiners. All pinned to the loopback interface, the same
+      recipe as cajeta's NetMulticastTests.
 
 e. **Dissemination + user data (G5)**
 
@@ -196,7 +200,16 @@ d. **Join / leave / discovery** · `gossip` (G4)
       `GossipNode`; the spec's `Cluster`/`GossipConfig` facade lands with
       G5's `events()`/`broadcast()`/`messages()` channels, which complete
       its surface.
-   2. [~] Multicast discovery group. *DEFERRED → on cajeta NET-14.* `GOSSIP-4b`.
+   2. [x] Multicast discovery group. `GOSSIP-4b` — done 2026-07-29 (NET-14
+      shipped). `enableDiscovery` makes a node a discoverable seed: a second
+      socket on the well-known discovery port, joined to the group, whose own
+      fiber (own WireWriter — writers don't share across fibers) answers SYNC
+      requests via the extracted `sendSnapshotVia`. `joinViaDiscovery`
+      multicasts the same SYNC request unicast join sends. The discovery
+      fiber never mutates the membership table — the joiner introduces
+      itself through normal ping traffic. One discoverable seed per host
+      port by design (plain bind, fails loudly; same-host multi-seed would
+      need SO_REUSEPORT, out of v1 scope).
 
 e. **Dissemination + app API** · `gossip` (G5)
 
@@ -244,5 +257,7 @@ d. [x] An N-node cluster converges and detects a killed node without false
    green; upstream gates NET-1.5 + the new `recvFromAsync` both landed).
 3. [x] **G5 dissemination** + **G6 cluster tests** — done 2026-07-20
    (130 checks green under BOTH `CAJETA_CARRIERS=1` and the default pool).
-4. [~] Multicast discovery (G4b) once cajeta **NET-14** ships; security +
-   Lifeguard are post-v1.
+4. [x] Multicast discovery (G4b) — done 2026-07-29; NET-14 shipped and
+   `GossipDiscoveryTests` is green (133 checks total, both carrier modes).
+   **CI caveat:** needs a cajeta release > v0.10.1 carrying NET-14 before the
+   pinned toolchain can compile it. Security + Lifeguard stay post-v1.

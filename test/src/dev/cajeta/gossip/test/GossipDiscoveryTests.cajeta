@@ -1,0 +1,151 @@
+package dev.cajeta.gossip.test;
+
+import dev.cajeta.gossip.GossipNode;
+import dev.cajeta.gossip.Member;
+import dev.cajeta.gossip.MemberState;
+import cajeta.io.net.IpAddress;
+import cajeta.concurrent.Tasks;
+
+// G4b — join via the multicast discovery group (plan §1.d.3, un-deferred by
+// cajeta NET-14). A discoverable seed binds a second socket on the well-known
+// discovery port and joins the group; a joiner multicasts the same SYNC
+// REQUEST the unicast path sends and pulls the answering seed's snapshot.
+//
+// Everything is pinned to the loopback interface (the seed joins the group on
+// 127.0.0.1, the joiner sends out of it), so no datagram leaves the host and
+// no real NIC is consulted — the same recipe cajeta's NetMulticastTests use.
+public final class GossipDiscoveryTests {
+
+    public static async void runNode(GossipNode n) {
+        n.receiveLoop();
+    }
+
+    public static async void runDisco(GossipNode n) {
+        n.discoveryLoop();
+    }
+
+    // 239.255.77.99 — organization-local scope, ours alone; a port unlikely
+    // to collide with anything else on a dev box or runner.
+    static int32 DISCO_PORT() { return 47831; }
+
+    public static void run(Check c) {
+        System.stdout.println("GossipDiscoveryTests");
+        discoverySeedAnswersJoin(c);
+        discoveryTimesOutWithoutSeed(c);
+        secondJoinerAlsoDiscovers(c);
+    }
+
+    // §1.d.3.a — a joiner that knows only the group finds the seed: the
+    // multicast SYNC request reaches the seed's discovery socket, the
+    // snapshot comes back unicast, and the joiner's table learns the seed
+    // (and everything the seed knew) without any seed address configured.
+    public static void discoverySeedAnswersJoin(Check c) {
+        () -> int32 body = () -> {
+            GossipNode s = heap GossipNode("dseed", 5000);
+            GossipNode j = heap GossipNode("djoiner", 5000);
+            // The seed already knows one other member — the snapshot must
+            // carry it, exactly as the unicast join's does.
+            s.table().applyAlive("dm", 0, 2130706433, 1, 7);
+            int32 result = 0;
+            scope {
+                spawn runNode(s);
+                spawn runNode(j);
+                IpAddress group = IpAddress.fromV4(239, 255, 77, 99);
+                IpAddress lo = IpAddress.loopbackV4();
+                s.enableDiscovery(group, GossipDiscoveryTests.DISCO_PORT(), lo);
+                spawn runDisco(s);
+                IpAddress group2 = IpAddress.fromV4(239, 255, 77, 99);
+                IpAddress lo2 = IpAddress.loopbackV4();
+                boolean ok = j.joinViaDiscovery(
+                    group2, GossipDiscoveryTests.DISCO_PORT(), lo2, 2000);
+                if (!ok) {
+                    result = 10;               // no snapshot arrived
+                } else {
+                    Member seedEntry = j.table().get("dseed");
+                    Member mEntry = j.table().get("dm");
+                    if (seedEntry == null
+                            || seedEntry.state != MemberState.ALIVE) {
+                        result = 11;           // joiner doesn't know the seed
+                    } else if (mEntry == null || mEntry.incarnation != 7) {
+                        result = 12;           // snapshot didn't carry dm
+                    } else {
+                        result = 1;
+                    }
+                }
+                s.stop();
+                j.stop();
+            }
+            return result;
+        };
+        int32 r = Tasks.runBlocking<int32>(body);
+        c.eqInt(r, 1, "multicast discovery join pulls the snapshot (code " + r + ")");
+    }
+
+    // §1.d.3.b — nobody serving the group: joinViaDiscovery reports failure
+    // by timeout instead of hanging or fabricating members.
+    public static void discoveryTimesOutWithoutSeed(Check c) {
+        () -> int32 body = () -> {
+            GossipNode j = heap GossipNode("lonely", 5000);
+            int32 result = 0;
+            scope {
+                spawn runNode(j);
+                IpAddress group = IpAddress.fromV4(239, 255, 77, 99);
+                IpAddress lo = IpAddress.loopbackV4();
+                // A port nothing binds in this suite.
+                boolean ok = j.joinViaDiscovery(group, 47839, lo, 300);
+                if (!ok && j.table().names.count() == 0) {
+                    result = 1;
+                }
+                j.stop();
+            }
+            return result;
+        };
+        int32 r = Tasks.runBlocking<int32>(body);
+        c.eqInt(r, 1, "discovery join times out with no seed (code " + r + ")");
+    }
+
+    // §1.d.3.c — the seed keeps serving: a second joiner discovers it the
+    // same way (the group membership survives the first answer).
+    public static void secondJoinerAlsoDiscovers(Check c) {
+        () -> int32 body = () -> {
+            GossipNode s = heap GossipNode("dseed2", 5000);
+            GossipNode j1 = heap GossipNode("dj1", 5000);
+            GossipNode j2 = heap GossipNode("dj2", 5000);
+            int32 result = 0;
+            scope {
+                spawn runNode(s);
+                spawn runNode(j1);
+                spawn runNode(j2);
+                IpAddress group = IpAddress.fromV4(239, 255, 77, 99);
+                IpAddress lo = IpAddress.loopbackV4();
+                s.enableDiscovery(group, 47836, lo);
+                spawn runDisco(s);
+                IpAddress g1 = IpAddress.fromV4(239, 255, 77, 99);
+                IpAddress lo1 = IpAddress.loopbackV4();
+                boolean ok1 = j1.joinViaDiscovery(g1, 47836, lo1, 2000);
+                IpAddress g2 = IpAddress.fromV4(239, 255, 77, 99);
+                IpAddress lo2 = IpAddress.loopbackV4();
+                boolean ok2 = j2.joinViaDiscovery(g2, 47836, lo2, 2000);
+                if (!ok1) {
+                    result = 10;
+                } else if (!ok2) {
+                    result = 11;
+                } else {
+                    Member atJ1 = j1.table().get("dseed2");
+                    Member atJ2 = j2.table().get("dseed2");
+                    if (atJ1 == null || atJ2 == null) {
+                        result = 12;
+                    } else {
+                        result = 1;
+                    }
+                }
+                s.stop();
+                j1.stop();
+                j2.stop();
+            }
+            return result;
+        };
+        int32 r = Tasks.runBlocking<int32>(body);
+        c.eqInt(r, 1, "seed answers repeated discoveries (code " + r + ")");
+    }
+}
