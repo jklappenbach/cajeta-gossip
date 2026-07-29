@@ -259,5 +259,5 @@ d. [x] An N-node cluster converges and detects a killed node without false
    (130 checks green under BOTH `CAJETA_CARRIERS=1` and the default pool).
 4. [x] Multicast discovery (G4b) — done 2026-07-29; NET-14 shipped and
    `GossipDiscoveryTests` is green (133 checks total, both carrier modes).
-   **CI caveat:** needs a cajeta release > v0.10.1 carrying NET-14 before the
-   pinned toolchain can compile it. Security + Lifeguard stay post-v1.
+   CI verified 2026-07-29 on the released cajeta v0.11.0 (pin bumped; 133/133
+   in CI). Security + Lifeguard stay post-v1.
