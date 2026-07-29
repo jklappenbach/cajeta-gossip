@@ -39,12 +39,14 @@
         // built into the toolchain — not declared, not fetched.
         "dependencies": {},
 
-        "dev-dependencies": {
-            "cajeta.testkit": "1.0.*"
-        },
+        // Empty: the suite is a self-checking binary under test/src (its own
+        // Check helper, no framework). The starter's `cajeta.testkit`
+        // placeholder named a package that exists in no repository.
+        "dev-dependencies": {},
 
         "repositories": [
-            { "name": "central", "url": "https://repo.cajeta.org",
+            // olla.cajeta.dev — repo.cajeta.org (the starter default) is NXDOMAIN.
+            { "name": "central", "url": "https://olla.cajeta.dev",
               "priority": 0 }
         ],
 
@@ -65,10 +67,10 @@
         },
 
         "test": {
-            // testkit is unpublished (same situation as dev.cajeta.http):
-            // the suite is an ordinary self-checking binary — test/src
+            // The suite is an ordinary self-checking binary — test/src
             // compiled against the built .cja via --classpath; exit 0 iff
-            // every check passes.
+            // every check passes. Self-contained and machine-independent,
+            // so CI runs this task directly (`cajeta test`).
             "description": "Build + run the library's unit tests",
             "actions": [
                 { "action": "build", "flavor": "debug", "id": "art" },
