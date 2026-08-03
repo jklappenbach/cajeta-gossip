@@ -22,7 +22,7 @@ jobs:
       # setMulticastInterface, ...), which first shipped in v0.11.0. Earlier
       # floors for the record: v0.9.4 (view element arrays, recvFromAsync).
       # Suite verified 133/133 on v0.11.0, both carrier modes.
-      cajeta-version: v0.11.0
+      cajeta-version: v0.15.0
       # The manifest's `test` task is self-contained (compiles test/src against
       # the built .cja, no external deps), so CI runs it directly.
       test-command: cajeta test
