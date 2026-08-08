@@ -12,7 +12,7 @@
 
     "details": {
         "name":                "dev.cajeta.gossip",
-        "version":             "0.1.0",
+        "version":             "0.1.1",
         "description":         "SWIM-style cluster membership and epidemic dissemination over cajeta.io.net UDP",
         "license":             "Apache-2.0",
         "authors":             ["Julian Klappenbach"],
@@ -25,7 +25,12 @@
         // 0.9.2 is the first toolchain with the library archetype + the
         // external-library ecosystem (dev.cajeta.http precedent).
         "toolchain": {
-            "version": "0.9.4"
+            // Raised to the ecosystem's current release (v0.17.4) so gossip
+            // resolves beside dev.cajeta.cloud / .ml / .docs. cajeta-dqe
+            // takes membership from here and the object store from cloud;
+            // a split pin is what made the timeseries/recsys transitive
+            // solve unsatisfiable, so the pins move together.
+            "version": "0.17.4"
         },
 
         // The full library needs UDP sockets; capabilities are re-validated
