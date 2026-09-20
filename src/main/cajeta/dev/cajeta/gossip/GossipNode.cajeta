@@ -76,10 +76,10 @@ public final class GossipNode {
     public GossipNode(String name, int64 suspectTimeoutMillis) {
         this.name = name;
         this.incarnation = 1;
-        IpAddress lo = IpAddress.loopbackV4();
-        SocketAddress bindAddr = SocketAddress.of(#lo, 0);
-        this.sock = UdpSocket.bind(bindAddr);
-        SocketAddress local = this.sock.localAddress();
+        IpAddress lo #= IpAddress.loopbackV4();
+        SocketAddress bindAddr #= SocketAddress.of(#lo, 0);
+        this.sock #= UdpSocket.bind(bindAddr);
+        SocketAddress local #= this.sock.localAddress();
         this.boundPort = local.getPort();
         this.membership = heap MembershipTable(suspectTimeoutMillis);
         this.acks = heap Channel<int64>(16);
@@ -115,7 +115,7 @@ public final class GossipNode {
     public void receiveLoop() {
         int8[] buf = heap int8[1500];
         while (this.running) {
-            RecvResult r = this.sock.recvFromAsync(buf, 0, 1500);
+            RecvResult r #= this.sock.recvFromAsync(buf, 0, 1500);
             if (!this.running) {
                 return;
             }
@@ -133,13 +133,13 @@ public final class GossipNode {
         this.running = false;
         int8[] poke = heap int8[1];
         poke[0] = (int8) 0;
-        IpAddress lo = IpAddress.loopbackV4();
-        SocketAddress self = SocketAddress.of(#lo, this.boundPort);
+        IpAddress lo #= IpAddress.loopbackV4();
+        SocketAddress self #= SocketAddress.of(#lo, this.boundPort);
         this.sock.sendTo(poke, 0, 1, self);
         if (this.disco != null) {
             // Same trick for the discovery fiber parked on its own socket.
-            IpAddress lo2 = IpAddress.loopbackV4();
-            SocketAddress d = SocketAddress.of(#lo2, this.discoPort);
+            IpAddress lo2 #= IpAddress.loopbackV4();
+            SocketAddress d #= SocketAddress.of(#lo2, this.discoPort);
             this.sock.sendTo(poke, 0, 1, d);
         }
     }
@@ -160,7 +160,7 @@ public final class GossipNode {
             this.rxWriter.begin(Wire.ACK, this.name, this.incarnation);
             this.piggyback.fill(this.rxWriter, this.gossipFanout,
                                 this.membership.names.count() + 1);
-            int8[] ack = this.rxWriter.finish();
+            int8[] ack #= this.rxWriter.finish();
             this.sock.sendTo(ack, 0, (int32) ack.count(), from);
         } else if (t == Wire.ACK) {
             // Direct evidence of life: upsert the sender ALIVE and apply
@@ -252,8 +252,8 @@ public final class GossipNode {
      *  address word + port). */
     public #SocketAddress addrOf(Member m) {
         int32 v4 = (int32) m.addrLo;
-        IpAddress ip = IpAddress.fromV4((v4 >> 24) & 255, (v4 >> 16) & 255,
-                                        (v4 >> 8) & 255, v4 & 255);
+        IpAddress ip #= IpAddress.fromV4((v4 >> 24) & 255, (v4 >> 16) & 255,
+                                         (v4 >> 8) & 255, v4 & 255);
         return SocketAddress.of(#ip, (int32) m.port);
     }
 
@@ -280,7 +280,7 @@ public final class GossipNode {
             }
             i = i + 1;
         }
-        int8[] frame = w.finish();
+        int8[] frame #= w.finish();
         this.sock.sendTo(frame, 0, (int32) frame.count(), dest);
     }
 
@@ -300,9 +300,9 @@ public final class GossipNode {
      */
     public void enableDiscovery(IpAddress group, int32 discoveryPort,
                                 IpAddress ifaceV4) {
-        IpAddress any = IpAddress.anyV4();
-        SocketAddress a = SocketAddress.of(#any, discoveryPort);
-        this.disco = UdpSocket.bind(a);
+        IpAddress any #= IpAddress.anyV4();
+        SocketAddress a #= SocketAddress.of(#any, discoveryPort);
+        this.disco #= UdpSocket.bind(a);
         this.disco.joinGroupOn(group, ifaceV4);
         this.discoPort = discoveryPort;
     }
@@ -320,7 +320,7 @@ public final class GossipNode {
     public void discoveryLoop() {
         int8[] buf = heap int8[1500];
         while (this.running) {
-            RecvResult r = this.disco.recvFromAsync(buf, 0, 1500);
+            RecvResult r #= this.disco.recvFromAsync(buf, 0, 1500);
             if (!this.running) {
                 return;
             }
@@ -367,8 +367,8 @@ public final class GossipNode {
         this.sock.setMulticastLoopback(true);
 
         int8[] go = group.getOctets();
-        IpAddress g = IpAddress.fromOctets(go, group.isV4() ? 4 : 16);
-        SocketAddress dest = SocketAddress.of(#g, discoveryPort);
+        IpAddress g #= IpAddress.fromOctets(go, group.isV4() ? 4 : 16);
+        SocketAddress dest #= SocketAddress.of(#g, discoveryPort);
 
         this.writer.begin(Wire.SYNC, this.name, this.incarnation);
         this.writer.addDelta((int8) MemberState.ALIVE, this.incarnation,
@@ -376,7 +376,7 @@ public final class GossipNode {
         int8[] req = heap int8[1];
         req[0] = (int8) 1;
         this.writer.setPayload(req);
-        int8[] frame = this.writer.finish();
+        int8[] frame #= this.writer.finish();
         this.sock.sendTo(frame, 0, (int32) frame.count(), dest);
 
         int32 waited = 0;
@@ -399,15 +399,15 @@ public final class GossipNode {
      */
     public boolean join(int32 seedPort, int32 timeoutMs) {
         int32 before = this.membership.names.count();
-        IpAddress lo = IpAddress.loopbackV4();
-        SocketAddress dest = SocketAddress.of(#lo, seedPort);
+        IpAddress lo #= IpAddress.loopbackV4();
+        SocketAddress dest #= SocketAddress.of(#lo, seedPort);
         this.writer.begin(Wire.SYNC, this.name, this.incarnation);
         this.writer.addDelta((int8) MemberState.ALIVE, this.incarnation,
                              0, 2130706433, (int64) this.boundPort, this.name);
         int8[] req = heap int8[1];
         req[0] = (int8) 1;
         this.writer.setPayload(req);
-        int8[] frame = this.writer.finish();
+        int8[] frame #= this.writer.finish();
         this.sock.sendTo(frame, 0, (int32) frame.count(), dest);
 
         int32 waited = 0;
@@ -425,12 +425,12 @@ public final class GossipNode {
      *  mark us LEFT immediately — no suspicion round. */
     public void leave() {
         this.writer.begin(Wire.LEAVE, this.name, this.incarnation);
-        int8[] frame = this.writer.finish();
+        int8[] frame #= this.writer.finish();
         int32 i = 0;
         while (i < this.membership.names.count()) {
             Member m = this.membership.get(this.membership.names.get(i));
             if (m.state == MemberState.ALIVE) {
-                SocketAddress dest = this.addrOf(m);
+                SocketAddress dest #= this.addrOf(m);
                 this.sock.sendTo(frame, 0, (int32) frame.count(), dest);
             }
             i = i + 1;
@@ -507,12 +507,12 @@ public final class GossipNode {
         this.piggyback.fill(this.writer, this.gossipFanout,
                             this.membership.names.count() + 1);
         this.writer.setPayload(payload);
-        int8[] frame = this.writer.finish();
+        int8[] frame #= this.writer.finish();
         int32 i = 0;
         while (i < this.membership.names.count()) {
             Member m = this.membership.get(this.membership.names.get(i));
             if (m.state == MemberState.ALIVE) {
-                SocketAddress dest = this.addrOf(m);
+                SocketAddress dest #= this.addrOf(m);
                 this.sock.sendTo(frame, 0, (int32) frame.count(), dest);
             }
             i = i + 1;
@@ -529,12 +529,12 @@ public final class GossipNode {
      */
     public boolean probe(String target, int32 targetPort, int32 timeoutMs,
                          int64 now) {
-        IpAddress lo = IpAddress.loopbackV4();
-        SocketAddress dest = SocketAddress.of(#lo, targetPort);
+        IpAddress lo #= IpAddress.loopbackV4();
+        SocketAddress dest #= SocketAddress.of(#lo, targetPort);
         this.writer.begin(Wire.PING, this.name, this.incarnation);
         this.piggyback.fill(this.writer, this.gossipFanout,
                             this.membership.names.count() + 1);
-        int8[] ping = this.writer.finish();
+        int8[] ping #= this.writer.finish();
         this.sock.sendTo(ping, 0, (int32) ping.count(), dest);
 
         if (this.awaitAckWithin(target, timeoutMs)) {
@@ -542,7 +542,7 @@ public final class GossipNode {
         }
 
         // Indirect round: PING_REQ(target) to up to k other live members.
-        int8[] targetBytes = target.toBytes();
+        int8[] targetBytes #= target.toBytes();
         int32 sentReqs = 0;
         int32 i = 0;
         while (i < this.membership.names.count() && sentReqs < this.indirectK) {
@@ -552,9 +552,9 @@ public final class GossipNode {
                 if (pm.state == MemberState.ALIVE) {
                     this.writer.begin(Wire.PING_REQ, this.name, this.incarnation);
                     this.writer.setPayload(targetBytes);
-                    int8[] req = this.writer.finish();
-                    IpAddress plo = IpAddress.loopbackV4();
-                    SocketAddress pdest = SocketAddress.of(#plo, (int32) pm.port);
+                    int8[] req #= this.writer.finish();
+                    IpAddress plo #= IpAddress.loopbackV4();
+                    SocketAddress pdest #= SocketAddress.of(#plo, (int32) pm.port);
                     this.sock.sendTo(req, 0, (int32) req.count(), pdest);
                     sentReqs = sentReqs + 1;
                 }

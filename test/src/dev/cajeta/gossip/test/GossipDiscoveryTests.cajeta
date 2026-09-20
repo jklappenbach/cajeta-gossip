@@ -50,12 +50,12 @@ public final class GossipDiscoveryTests {
             scope {
                 spawn runNode(s);
                 spawn runNode(j);
-                IpAddress group = IpAddress.fromV4(239, 255, 77, 99);
-                IpAddress lo = IpAddress.loopbackV4();
+                IpAddress group #= IpAddress.fromV4(239, 255, 77, 99);
+                IpAddress lo #= IpAddress.loopbackV4();
                 s.enableDiscovery(group, GossipDiscoveryTests.DISCO_PORT(), lo);
                 spawn runDisco(s);
-                IpAddress group2 = IpAddress.fromV4(239, 255, 77, 99);
-                IpAddress lo2 = IpAddress.loopbackV4();
+                IpAddress group2 #= IpAddress.fromV4(239, 255, 77, 99);
+                IpAddress lo2 #= IpAddress.loopbackV4();
                 boolean ok = j.joinViaDiscovery(
                     group2, GossipDiscoveryTests.DISCO_PORT(), lo2, 2000);
                 if (!ok) {
@@ -89,8 +89,8 @@ public final class GossipDiscoveryTests {
             int32 result = 0;
             scope {
                 spawn runNode(j);
-                IpAddress group = IpAddress.fromV4(239, 255, 77, 99);
-                IpAddress lo = IpAddress.loopbackV4();
+                IpAddress group #= IpAddress.fromV4(239, 255, 77, 99);
+                IpAddress lo #= IpAddress.loopbackV4();
                 // A port nothing binds in this suite.
                 boolean ok = j.joinViaDiscovery(group, 47839, lo, 300);
                 if (!ok && j.table().names.count() == 0) {
@@ -116,15 +116,15 @@ public final class GossipDiscoveryTests {
                 spawn runNode(s);
                 spawn runNode(j1);
                 spawn runNode(j2);
-                IpAddress group = IpAddress.fromV4(239, 255, 77, 99);
-                IpAddress lo = IpAddress.loopbackV4();
+                IpAddress group #= IpAddress.fromV4(239, 255, 77, 99);
+                IpAddress lo #= IpAddress.loopbackV4();
                 s.enableDiscovery(group, 47836, lo);
                 spawn runDisco(s);
-                IpAddress g1 = IpAddress.fromV4(239, 255, 77, 99);
-                IpAddress lo1 = IpAddress.loopbackV4();
+                IpAddress g1 #= IpAddress.fromV4(239, 255, 77, 99);
+                IpAddress lo1 #= IpAddress.loopbackV4();
                 boolean ok1 = j1.joinViaDiscovery(g1, 47836, lo1, 2000);
-                IpAddress g2 = IpAddress.fromV4(239, 255, 77, 99);
-                IpAddress lo2 = IpAddress.loopbackV4();
+                IpAddress g2 #= IpAddress.fromV4(239, 255, 77, 99);
+                IpAddress lo2 #= IpAddress.loopbackV4();
                 boolean ok2 = j2.joinViaDiscovery(g2, 47836, lo2, 2000);
                 if (!ok1) {
                     result = 10;

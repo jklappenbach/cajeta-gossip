@@ -59,7 +59,7 @@ public final class MembershipTable {
             // borrowed stores); the map takes OWNERSHIP of the member
             // (`#` — a borrowed put would drop `fresh` at scope exit and
             // alias every entry to the recycled allocation).
-            int8[] nb = name.toBytes();
+            int8[] nb #= name.toBytes();
             int32 n = (int32) nb.count();
             String nameCopy = heap String(#nb, n);
             this.names.add(#nameCopy);

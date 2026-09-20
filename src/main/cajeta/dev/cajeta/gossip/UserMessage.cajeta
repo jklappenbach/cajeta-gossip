@@ -10,7 +10,7 @@ public final class UserMessage {
     public int8[] payload;
 
     public UserMessage(String from, int8[] payload, int32 length) {
-        int8[] fb = from.toBytes();
+        int8[] fb #= from.toBytes();
         int32 fn = (int32) fb.count();
         String owned = heap String(#fb, fn);
         this.from = #owned;

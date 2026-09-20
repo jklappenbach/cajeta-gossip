@@ -13,7 +13,7 @@ public final class MembershipEvent {
     public MembershipEvent(EventKind kind, String name) {
         this.kind = kind;
         // Own a copy — callers pass borrowed names.
-        int8[] nb = name.toBytes();
+        int8[] nb #= name.toBytes();
         int32 n = (int32) nb.count();
         String owned = heap String(#nb, n);
         this.name = #owned;
