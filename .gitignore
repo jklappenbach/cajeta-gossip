@@ -7,3 +7,6 @@ dist/
 # Editor / OS
 .DS_Store
 *.swp
+
+# Scratch: downloaded toolchains, extracted stdlib, probe programs.
+tmp/
