@@ -12,7 +12,7 @@
 
     "details": {
         "name":                "dev.cajeta.gossip",
-        "version":             "0.1.1",
+        "version":             "0.1.2",
         "description":         "SWIM-style cluster membership and epidemic dissemination over cajeta.io.net UDP",
         "license":             "Apache-2.0",
         "authors":             ["Julian Klappenbach"],
@@ -30,7 +30,26 @@
             // takes membership from here and the object store from cloud;
             // a split pin is what made the timeseries/recsys transitive
             // solve unsatisfiable, so the pins move together.
-            "version": "0.17.4"
+            //
+            // Raised again to v0.29.0, and this time the pin buys a check
+            // rather than only ecosystem alignment.
+            // CAJETA_ERROR_OWNED_RESULT_NEEDS_TRANSFER refuses a plain `=`
+            // binding of a call returning `#T`. It arrived in v0.21.0 (cajeta
+            // aa382ae0), so what hid it here was the old v0.17.4 pin rather
+            // than the age of the check. Measured on the two
+            // released binaries against the very call this library makes:
+            // `IpAddress a = IpAddress.loopbackV4()` is refused by v0.29.0
+            // with the fix named, and compiled without a word by v0.17.4.
+            // These sources carried 52 of that spelling until the commit
+            // before this one, so at the old pin the compiler the library is
+            // developed against cannot see the class of defect the library
+            // most recently had.
+            //
+            // The FLOOR is unchanged at v0.11.0 and is not this pin. The
+            // corrected sources still build and the suite still reports
+            // 133/133 on v0.11.0 and on v0.17.4, so a consumer held back on
+            // an older toolchain loses nothing by the raise.
+            "version": "0.29.0"
         },
 
         // The full library needs UDP sockets; capabilities are re-validated

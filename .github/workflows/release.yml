@@ -28,7 +28,20 @@ jobs:
       # behind — cajeta-dqe consumes membership from HERE and the object
       # store from cloud, and a split pin is exactly what made the
       # timeseries/recsys solver conflict unsatisfiable.
-      cajeta-version: v0.17.4
+      #
+      # Raised to v0.29.0 for a reason CI can act on.
+      # CAJETA_ERROR_OWNED_RESULT_NEEDS_TRANSFER refuses a plain `=` binding of
+      # a call returning `#T`, and this repo carried 52 of that spelling until
+      # the ownership commit that precedes this raise. The check arrived in
+      # v0.21.0 (cajeta aa382ae0), so what hid it here was the old v0.17.4 pin
+      # and not the age of the check. Measured on the released binaries with
+      # the call the library actually makes:
+      # v0.29.0 refuses `IpAddress a = IpAddress.loopbackV4()` and names the
+      # fix, v0.17.4 compiles it silently. Only the new pin makes CI the thing
+      # that catches the next one. The FLOOR above is unchanged, and the
+      # corrected sources still report 133/133 on v0.11.0.
+      # Suite verified 133/133 on v0.29.0, both carrier modes.
+      cajeta-version: v0.29.0
       # The manifest's `test` task is self-contained (compiles test/src against
       # the built .cja, no external deps), so CI runs it directly.
       test-command: cajeta test
