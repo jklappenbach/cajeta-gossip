@@ -1,5 +1,7 @@
 package dev.cajeta.gossip.test;
 
+import cajeta.concurrent.Fiber;
+import cajeta.time.Duration;
 import dev.cajeta.gossip.GossipNode;
 import dev.cajeta.gossip.Member;
 import dev.cajeta.gossip.MemberState;
@@ -72,7 +74,7 @@ public final class GossipDisseminationTests {
                                     && a3 != null) {
                                 done = true;
                             } else {
-                                Tasks.sleepMillis(25);
+                                Fiber.sleep(Duration.ofMillis(25));
                                 waited = waited + 25;
                             }
                         }
@@ -124,7 +126,7 @@ public final class GossipDisseminationTests {
                     int32 waited = 0;
                     while (waited < 1000
                             && (b.inbox.count() < 1 || x.inbox.count() < 1)) {
-                        Tasks.sleepMillis(10);
+                        Fiber.sleep(Duration.ofMillis(10));
                         waited = waited + 10;
                     }
                     if (b.inbox.count() < 1 || x.inbox.count() < 1) {

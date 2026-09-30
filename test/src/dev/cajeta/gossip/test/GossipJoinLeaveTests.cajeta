@@ -1,5 +1,7 @@
 package dev.cajeta.gossip.test;
 
+import cajeta.concurrent.Fiber;
+import cajeta.time.Duration;
 import dev.cajeta.gossip.GossipNode;
 import dev.cajeta.gossip.Member;
 import dev.cajeta.gossip.MemberState;
@@ -86,7 +88,7 @@ public final class GossipJoinLeaveTests {
                         if (m != null && m.state == MemberState.LEFT) {
                             left = true;
                         } else {
-                            Tasks.sleepMillis(10);
+                            Fiber.sleep(Duration.ofMillis(10));
                             waited = waited + 10;
                         }
                     }

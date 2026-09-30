@@ -1,5 +1,6 @@
 package dev.cajeta.gossip;
 
+import cajeta.concurrent.Fiber;
 import cajeta.lang.Optional;
 import cajeta.io.net.UdpSocket;
 import cajeta.io.net.SocketAddress;
@@ -384,7 +385,7 @@ public final class GossipNode {
             if (this.membership.names.count() > before) {
                 return true;
             }
-            Tasks.sleepMillis(5);
+            Fiber.sleep(Duration.ofMillis(5));
             waited = waited + 5;
         }
         return false;
@@ -415,7 +416,7 @@ public final class GossipNode {
             if (this.membership.names.count() > before) {
                 return true;
             }
-            Tasks.sleepMillis(5);
+            Fiber.sleep(Duration.ofMillis(5));
             waited = waited + 5;
         }
         return false;
@@ -492,7 +493,7 @@ public final class GossipNode {
             }
             this.membership.tick(Clock.millisTime());
             this.drainEvents();
-            Tasks.sleepMillis((int64) periodMs);
+            Fiber.sleep(Duration.ofMillis((int64) periodMs));
         }
     }
 
@@ -572,7 +573,7 @@ public final class GossipNode {
     /**
      * Drain the ack channel until an ack for `target` arrives or
      * `timeoutMs` elapses. Bounded polling with a cooperative fiber sleep
-     * ([`Tasks.sleepMillis`](../../../cajeta/concurrent/Tasks.cajeta#sleepMillis))
+     * ([`Fiber.sleep`](../../../cajeta/concurrent/Fiber.cajeta#sleep))
      * — `Tasks.withTimeout` cannot interrupt a fiber parked on
      * `Channel.receive`, so the probe window polls at 5ms granularity
      * instead (the receive fiber itself still parks on the reactor; only
@@ -589,7 +590,7 @@ public final class GossipNode {
                 }
                 // ack for someone else — keep draining this pass
             } else {
-                Tasks.sleepMillis(5);
+                Fiber.sleep(Duration.ofMillis(5));
                 waited = waited + 5;
             }
         }
