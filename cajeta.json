@@ -12,7 +12,7 @@
 
     "details": {
         "name":                "dev.cajeta.gossip",
-        "version":             "0.1.2",
+        "version":             "0.1.3",
         "description":         "SWIM-style cluster membership and epidemic dissemination over cajeta.io.net UDP",
         "license":             "Apache-2.0",
         "authors":             ["Julian Klappenbach"],
@@ -49,7 +49,9 @@
             // corrected sources still build and the suite still reports
             // 133/133 on v0.11.0 and on v0.17.4, so a consumer held back on
             // an older toolchain loses nothing by the raise.
-            "version": "0.29.0"
+            //
+            // Raised to v0.32.0, now a floor: Fiber.sleep(Duration) arrived there.
+            "version": "0.32.0"
         },
 
         // The full library needs UDP sockets; capabilities are re-validated
