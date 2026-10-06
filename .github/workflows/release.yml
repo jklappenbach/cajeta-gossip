@@ -41,7 +41,7 @@ jobs:
       # that catches the next one. The FLOOR above is unchanged, and the
       # corrected sources still report 133/133 on v0.11.0.
       # Suite verified 133/133 on v0.29.0, both carrier modes.
-      cajeta-version: v0.32.0
+      cajeta-version: v0.35.0
       # The manifest's `test` task is self-contained (compiles test/src against
       # the built .cja, no external deps), so CI runs it directly.
       test-command: cajeta test

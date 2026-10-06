@@ -75,7 +75,7 @@ public final class GossipNode {
     public int32 discoPort;
 
     public GossipNode(String name, int64 suspectTimeoutMillis) {
-        this.name = name;
+        this.name #= name;
         this.incarnation = 1;
         IpAddress lo #= IpAddress.loopbackV4();
         SocketAddress bindAddr #= SocketAddress.of(#lo, 0);
